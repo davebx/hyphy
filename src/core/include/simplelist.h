@@ -610,6 +610,8 @@ class _SimpleList:public BaseObj {
         * Request space for a given # of elements 
         */
         void RequestSpace(long);
+    
+        virtual bool is_numeric_list (void) const { return true;}
 
         void Subtract(_SimpleList const &, _SimpleList const&);
 
@@ -674,7 +676,7 @@ class _SimpleList:public BaseObj {
         *
         */
     
-        _SimpleList* CountingSort(long, _SimpleList* = nil);
+        _SimpleList* CountingSort(long, _SimpleList* = nil, bool wantResult = true);
 
         void BubbleSort(void);
         void QuickSort(long, long);

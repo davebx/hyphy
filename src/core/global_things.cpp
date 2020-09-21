@@ -100,7 +100,7 @@ namespace hy_global {
     hyTreeDefinitionPhase
                      isDefiningATree = kTreeNotBeingDefined;
     
-    hyFloat          kMachineEpsilon = 2.*DBL_EPSILON;
+    const hyFloat    kMachineEpsilon = 2.*DBL_EPSILON;
 
     
     _String const    kEmptyString,
@@ -120,11 +120,12 @@ namespace hy_global {
                      kErrorStringDatasetRefIndexError ("Dataset index reference out of range"),
                      kErrorStringMatrixExportError    ("Export matrix called with a non-polynomial matrix argument"),
                      kErrorStringNullOperand          ("Attempting to operate on an undefined value; this is probably the result of an earlier 'soft' error condition"),
-                     kHyPhyVersion  = _String ("2.5.8"),
+                     kHyPhyVersion  = _String ("2.5.17"),
     
                     kNoneToken = "None",
                     kNullToken = "null",
-                    kNoKWMatch = "__input_value_not_given__";
+                    kNoKWMatch = "__input_value_not_given__",
+                    kEndIteration = "__iterator_end__loop__";
   
     _String
                      hy_base_directory,
@@ -798,16 +799,19 @@ namespace hy_global {
     time (&c_time);
     
     if (do_gmt) {
-      tm* gmt = gmtime (&c_time);
+      tm  gmt;
+      gmtime_r (&c_time, &gmt);
       
-      return _StringBuffer (_String((long)1900+gmt->tm_year)) << '/' << _String (1+(long)gmt->tm_mon) << '/'
-             << _String ((long)gmt->tm_mday) << ' ' << _String ((long)gmt->tm_hour) << ':' & _String ((long)gmt->tm_min);
+      return _StringBuffer (_String((long)1900+gmt.tm_year)) << '/' << _String (1+(long)gmt.tm_mon) << '/'
+            << _String ((long)gmt.tm_mday) << ' ' << _String ((long)gmt.tm_hour) << ':' & _String ((long)gmt.tm_min);
     }
     
-    tm*     local_time = localtime (&c_time);
+    tm    local_time;
+    localtime_r (&c_time, &local_time);
+    char  time_buffer [128];
     
-    return  asctime (local_time);
-    
+    asctime_r (&local_time, time_buffer);
+    return time_buffer;
   }
   
   //____________________________________________________________________________________
@@ -824,7 +828,7 @@ namespace hy_global {
           char tmpFileName[] = "/tmp/HYPHY-XXXXXX";
           int fileDescriptor = mkstemp(tmpFileName);
           if (fileDescriptor == -1){
-            throw ("Failed to create a temporary file name");
+            throw _String("Failed to create a temporary file name");
           }
           path_name = tmpFileName;
           CheckReceptacleAndStore(&hy_env::last_file_path,kEmptyString,false, new _FString (path_name, false), false);

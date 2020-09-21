@@ -308,7 +308,8 @@ namespace hy_global {
   kErrorStringUnterminatedMatrix,
   kNoneToken,
   kNullToken,
-  kNoKWMatch;
+  kNoKWMatch,
+  kEndIteration;
   
   extern  _String  hy_base_directory,
   hy_error_log_name,
@@ -320,7 +321,7 @@ namespace hy_global {
   
   extern _Variable * hy_x_variable, * hy_n_variable;
     
-  extern hyFloat     kMachineEpsilon;
+  extern const hyFloat     kMachineEpsilon;
   
   extern regex_t   * hy_float_regex,
                    * hy_replicate_constraint_regexp;

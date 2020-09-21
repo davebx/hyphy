@@ -515,6 +515,7 @@ void _DataSet::Finalize(void) {
 
       for (long i3 = 0; i3 < lLength; i3++) {
         tC = (_Site *)(*(_List *)this)(i3);
+        tC->TrimSpace();
         tC->SetRefNo(0);
       }
       if (dsh) {
@@ -693,14 +694,14 @@ void _DataSet::MatchIndices(_Formula &f, _SimpleList &receptacle, bool isVert,
   // ? scope->sData : "none", varName.sData, ((_String*)f.toStr())->sData);
 
   for (long i = 0L; i < limit; i++) {
-    v->SetValue(new _Constant((hyFloat)i), false);
+    v->SetValue(new _Constant((hyFloat)i), false, i == 0, NULL);
     HBLObjectRef res = f.Compute();
     // fprintf (stderr, "%ld %g\n", i, res->Compute()->Value());
     if (res && !CheckEqual(res->Value(), 0.0)) {
       receptacle << i;
     }
   }
-  v->SetValue(new _Constant(0.0), false);
+  v->SetValue(new _Constant(0.0), false, false, NULL);
 }
 
 //_________________________________________________________
@@ -1452,8 +1453,8 @@ bool    StoreADataSet (_DataSet* ds, _String* setName) {
         
         for (unsigned long i = 0UL; i < ds->NoOfSpecies(); i ++) {
             _String * old_name = new _String (*ds->GetSequenceName (i));
-            if (! old_name->IsValidIdentifier(false) ) {
-                *ds->GetSequenceName (i) = ds->GetSequenceName (i)->ConvertToAnIdent(false);
+            if (! old_name->IsValidIdentifier(fIDAllowFirstNumeric) ) {
+                *ds->GetSequenceName (i) = ds->GetSequenceName (i)->ConvertToAnIdent(fIDAllowFirstNumeric);
                 did_something = true;
             }
             if (id_mapping.Find (ds->GetSequenceName (i)) >= 0) {
@@ -1619,7 +1620,7 @@ void    processCommand (_String * s, FileState*fs) {
                     
             }
         }
-    } catch (const _String warning) {
+    } catch (const _String& warning) {
         ReportWarning (warning);
     }
 }
@@ -1672,7 +1673,7 @@ void    ProcessTree (FileState *fState, FILE* f, _String& CurrentLine) {
             file = f;
         }
         
-        virtual const char get_char(long index) {
+        virtual char get_char(long index) {
             if (index >= 0L && index < s_length) {
                 return s_data[index];
             } else {
@@ -1862,19 +1863,20 @@ void ReadNextLine (FILE* fp, _String *s, FileState* fs, bool, bool upCase) {
     char lastc;
     
     if (fp) {
-        lastc = fgetc(fp);
+        lastc = getc_unlocked (fp);
     } else {
         lastc = fs->pInSrc<fs->theSource->length()?fs->theSource->char_at(fs->pInSrc++):0;
     }
     
+    
     if (fs->fileType != 3) { // not NEXUS - do not skip [..]
         if (fp)
-            while ( !feof(fp) && lastc!=10 && lastc!=13 ) {
+            while ( !feof_unlocked(fp) && lastc!=10 && lastc!=13 ) {
                 if (lastc) {
                     tempBuffer << lastc;
                 }
                 
-                lastc = fgetc(fp);
+                lastc = getc_unlocked(fp);
             }
         else
             while (lastc && lastc!=10 && lastc!=13 ) {
@@ -1887,7 +1889,7 @@ void ReadNextLine (FILE* fp, _String *s, FileState* fs, bool, bool upCase) {
             lastc = toupper(lastc);
         }
         
-        while (((fp&&(!feof(fp)))||(fs->theSource&&(fs->pInSrc<=fs->theSource->length ()))) && lastc!='\r' && lastc!='\n') {
+        while (((fp&&(!feof_unlocked(fp)))||(fs->theSource&&(fs->pInSrc<=fs->theSource->length ()))) && lastc!='\r' && lastc!='\n') {
             if (lastc=='[') {
                 if (fs->isSkippingInNEXUS) {
                     ReportWarning ("Nested comments in NEXUS really shouldn't be used.");
@@ -1908,7 +1910,7 @@ void ReadNextLine (FILE* fp, _String *s, FileState* fs, bool, bool upCase) {
                 if (upCase) {
                     lastc = toupper(fgetc(fp));
                 } else {
-                    lastc = fgetc(fp);
+                    lastc = getc_unlocked(fp);
                 }
             } else {
                 if (upCase) {
@@ -1927,7 +1929,7 @@ void ReadNextLine (FILE* fp, _String *s, FileState* fs, bool, bool upCase) {
     
     tempBuffer.TrimSpace();
     
-    if ( (fp && feof(fp)) || (fs->theSource && fs->pInSrc >= fs->theSource->length()) ) {
+    if ( (fp && feof_unlocked (fp)) || (fs->theSource && fs->pInSrc >= fs->theSource->length()) ) {
         if (tempBuffer.empty ()) {
             *s = "";
             return;
@@ -1972,11 +1974,18 @@ _DataSet* ReadDataSetFile (FILE*f, char execBF, _String* theS, _String* bfName, 
     
     try {
     
-        _String         CurrentLine = hy_env::data_file_tree_string & "={{}};",
+        if (f) flockfile (f);
+        
+        hy_env::EnvVariableSet(hy_env::data_file_tree_string, new _Matrix, false);
+        
+        _String savedLine;
+        
+        /*_String         CurrentLine = hy_env::data_file_tree_string & "={{}};",
                         savedLine;
         
         _ExecutionList reset (CurrentLine);
-        reset.Execute();
+        reset.Execute();*/
+        
     #ifdef __HYPHYMPI__
         if (hy_mpi_node_rank == 0L)
     #endif
@@ -2030,12 +2039,12 @@ _DataSet* ReadDataSetFile (FILE*f, char execBF, _String* theS, _String* bfName, 
         }
     #endif
         
-        
+        _String     CurrentLine;
         
         //if (f==NULL) return (_DataSet*)result.makeDynamic();
         // nothing to do
         
-        CurrentLine = kEmptyString;
+        //CurrentLine = kEmptyString;
         
         ReadNextLine (f,&CurrentLine,&fState);
         if (CurrentLine.empty()) {
@@ -2278,6 +2287,7 @@ _DataSet* ReadDataSetFile (FILE*f, char execBF, _String* theS, _String* bfName, 
             {
                 _TranslationTable *trialTable = new _TranslationTable (hy_default_translation_table);
                 trialTable->baseLength = 2;
+                if (f) funlockfile (f);
                 _DataSet * res2 = ReadDataSetFile (f, execBF, theS, bfName, namespaceID, trialTable);
                 if (res2->GetNoTypes()) {
                     DeleteObject (result);
@@ -2332,12 +2342,13 @@ _DataSet* ReadDataSetFile (FILE*f, char execBF, _String* theS, _String* bfName, 
                 nexusBFBody         = kEmptyString;
             }
         }
-    } catch (const _String err) {
+    } catch (const _String& err) {
         DeleteObject (result);
+        if (f) funlockfile (f);
         HandleApplicationError(err);
         result = nil;
     }
-    
+    if (f) funlockfile (f);
     return result;
 }
 
