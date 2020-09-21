@@ -15,11 +15,13 @@ jobs:
       - name: Get HyPhy code
         uses: actions/checkout@v2
       - name: Build and generate coverage report
+        env: 
+          COVERALLS_REPO_TOKEN: ${{ secrets.coveralls_token }}
         run:
           cmake .;
           make -j HYPHYDEBUG;
           python -m pip install --upgrade cpp-coveralls;
-          coveralls --gcov-options '\-lp' --repo-token ${{ github.token }};
+          coveralls --gcov-options '\-lp';
   # finish:
   #   needs: test
   #   runs-on: ubuntu-latest
