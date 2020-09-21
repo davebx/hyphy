@@ -22,7 +22,7 @@ jobs:
       - name: Build HyPhy with profiling flags
         run:
           cmake .;
-          make -j HYPHYPROFILE;
+          make -j HYPHYDEBUG;
       - name: Submit coveralls report
         run:
           coveralls --gcov-options '\-lp';
