@@ -20,10 +20,11 @@ jobs:
         run:
           cmake .;
           make -j HYPHYDEBUG;
+          make test || true;
           python -m pip install --upgrade cpp-coveralls;
-          ./HYPHYDEBUG --help >/dev/null 2>&1 || echo;
+          ./HYPHYDEBUG --help || true;
           ln -s HYPHYDEBUG hyphy;
-          make test || echo;
+          echo 'Running `make test`'
           coveralls --gcov-options '\-lp';
   # finish:
   #   needs: test
