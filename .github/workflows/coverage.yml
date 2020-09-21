@@ -18,7 +18,7 @@ jobs:
         run:
           cmake .;
           make -j HYPHYDEBUG;
-          pip install --user cpp-coveralls;
+          python -m pip install --upgrade cpp-coveralls;
           coveralls --gcov-options '\-lp' --repo-token ${{ github.token }};
   # finish:
   #   needs: test
