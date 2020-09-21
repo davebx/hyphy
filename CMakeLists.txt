@@ -438,11 +438,11 @@ set_target_properties(
     HYPHYPROFILE
     PROPERTIES
     if(${OPENMP_FOUND})
-        COMPILE_FLAGS "${DEFAULT_COMPILE_FLAGS} ${OpenMP_CXX_FLAGS} -g -fprofile-generate -fanalyzer "
-        LINK_FLAGS "${DEFAULT_COMPILE_FLAGS} ${OpenMP_CXX_FLAGS} -g -fprofile-generate -fanalyzer "
+        COMPILE_FLAGS "${DEFAULT_COMPILE_FLAGS} ${OpenMP_CXX_FLAGS} -g -fprofile-arcs -ftest-coverage -fprofile-generate -fanalyzer "
+        LINK_FLAGS "${DEFAULT_COMPILE_FLAGS} ${OpenMP_CXX_FLAGS} -g -fprofile-arcs -ftest-coverage -fprofile-generate -fanalyzer "
     else(${OPENMP_FOUND})
-        COMPILE_FLAGS "${DEFAULT_COMPILE_FLAGS}-g -fprofile-generate -fanalyzer "
-        LINK_FLAGS "${DEFAULT_COMPILE_FLAGS} -g  -fprofile-generate -fanalyzer "
+        COMPILE_FLAGS "${DEFAULT_COMPILE_FLAGS}-g -fprofile-arcs -ftest-coverage -fprofile-generate -fanalyzer "
+        LINK_FLAGS "${DEFAULT_COMPILE_FLAGS} -g  -fprofile-arcs -ftest-coverage -fprofile-generate -fanalyzer "
     endif(${OPENMP_FOUND})
 )
 
@@ -495,25 +495,6 @@ add_custom_target(DEBUG DEPENDS HYPHYDEBUG)
 #-------------------------------------------------------------------------------
 # hyphy coverage target
 #-------------------------------------------------------------------------------
-add_custom_target(COVERAGE DEPENDS hyphy)
-
-set_property(
-    TARGET COVERAGE
-    APPEND PROPERTY COMPILE_DEFINITIONS __UNITTEST__
-)
-
-set_target_properties(
-    COVERAGE
-    PROPERTIES
-    if(${OPENMP_FOUND})
-        COMPILE_FLAGS "${DEFAULT_COMPILE_FLAGS} ${DEFAULT_DEBUG_WARNING_FLAGS} ${OpenMP_CXX_FLAGS} -msse3 -g -fprofile-arcs -ftest-coverage -pg"
-        LINK_FLAGS "${DEFAULT_COMPILE_FLAGS} ${DEFAULT_DEBUG_WARNING_FLAGS} ${OpenMP_CXX_FLAGS} -msse3 -g -fprofile-arcs -ftest-coverage -pg"
-    else(${OPENMP_FOUND})
-        COMPILE_FLAGS "${DEFAULT_COMPILE_FLAGS} ${DEFAULT_DEBUG_WARNING_FLAGS} -msse3 -g -fprofile-arcs -ftest-coverage -pg"
-        LINK_FLAGS "${DEFAULT_COMPILE_FLAGS} ${DEFAULT_DEBUG_WARNING_FLAGS} -msse3 -g -fprofile-arcs -ftest-coverage -pg"
-    endif(${OPENMP_FOUND})
-)
-
 
 set_target_properties(
     HYPHYDEBUG
