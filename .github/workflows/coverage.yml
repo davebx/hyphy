@@ -22,9 +22,8 @@ jobs:
           make -j HYPHYDEBUG;
           make test || true;
           python -m pip install --upgrade cpp-coveralls;
-          ./HYPHYDEBUG --help || true;
+          ./HYPHYDEBUG --help 2&>1 || true;
           ln -s HYPHYDEBUG hyphy;
-          echo 'Running `make test`'
           coveralls --gcov-options '\-lp';
   # finish:
   #   needs: test
