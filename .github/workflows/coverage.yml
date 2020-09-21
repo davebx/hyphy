@@ -23,7 +23,7 @@ jobs:
           python -m pip install --upgrade cpp-coveralls;
           ./HYPHYDEBUG --help >/dev/null 2>&1 || echo;
           ln -s HYPHYDEBUG hyphy;
-          make test > /dev/null 2>&1 || echo;
+          make test || echo;
           coveralls --gcov-options '\-lp';
   # finish:
   #   needs: test
