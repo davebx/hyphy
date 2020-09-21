@@ -1,11 +1,11 @@
-name: Coverage
+name: Coverage Report
 on:
   push:
     branches: [ master ]
   pull_request:
     branches: [ master ]
 jobs:
-  benchmark:
+  coverage:
     name: Coveralls Coverage Report
     runs-on: ubuntu-latest
     steps:
@@ -17,8 +17,9 @@ jobs:
           python -m pip install --upgrade pip;
           pip install --user cpp-coveralls;
           sudo apt update;
-      - name: Build HyPhy with profiling flags
+      - name: Get HyPhy code
         uses: actions/checkout@v2
+      - name: Build HyPhy with profiling flags
         run:
           cmake .;
           make -j HYPHYPROFILE;
