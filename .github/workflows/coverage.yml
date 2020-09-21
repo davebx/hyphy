@@ -21,6 +21,7 @@ jobs:
           cmake .;
           make -j HYPHYDEBUG;
           python -m pip install --upgrade cpp-coveralls;
+          ./HYPHYDEBUG --help;
           coveralls --gcov-options '\-lp';
   # finish:
   #   needs: test
