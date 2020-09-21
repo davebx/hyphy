@@ -26,7 +26,9 @@ jobs:
         run:
           cmake .;
           make -j HYPHYDEBUG;
-          make test || true;
+          ln -s HYPHYDEBUG hyphy;
+          ln -s HYPHYDEBUG HYPHYMP;
+          PATH=.:$PATH make test || true;
           python -m pip install --upgrade cpp-coveralls;
           ./HYPHYDEBUG --help 2&>1 || true;
           ln -s HYPHYDEBUG hyphy;
