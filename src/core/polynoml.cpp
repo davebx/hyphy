@@ -87,9 +87,16 @@ _PolynomialData::_PolynomialData (long vars)
 }
 
 //__________________________________________________________________________________
-_PolynomialData::_PolynomialData (_PolynomialData& source)
-{
+_PolynomialData::_PolynomialData (_PolynomialData const& source) {
     Duplicate(&source);
+}
+
+//__________________________________________________________________________________
+_PolynomialData const & _PolynomialData::operator = (_PolynomialData const& source) {
+    if (this != &source) {
+        Duplicate(&source);
+    }
+    return *this;
 }
 
 //__________________________________________________________________________________
@@ -772,19 +779,26 @@ _Polynomial::_Polynomial (_Variable& v)
 
 //__________________________________________________________________________________
 
-_Polynomial::_Polynomial (_Polynomial& p)
-{
-    variableIndex.Duplicate (&p.variableIndex);
-    theTerms = new _PolynomialData;
-    if (p.theTerms) {
-        theTerms->Duplicate (p.theTerms);
-    } else {
-        theTerms->numberVars = variableIndex.countitems();
-    }
-    compList1.Duplicate (&p.compList1);
-    compList2.Duplicate (&p.compList2);
+_Polynomial::_Polynomial (_Polynomial const& p) {
+    *this = p;
 }
 
+//__________________________________________________________________________________
+
+_Polynomial const & _Polynomial::operator = (_Polynomial const& p) {
+    if (this != &p) {
+        variableIndex.Duplicate (&p.variableIndex);
+        theTerms = new _PolynomialData;
+        if (p.theTerms) {
+            theTerms->Duplicate (p.theTerms);
+        } else {
+            theTerms->numberVars = variableIndex.countitems();
+        }
+        compList1.Duplicate (&p.compList1);
+        compList2.Duplicate (&p.compList2);
+    }
+    return *this;
+}
 //__________________________________________________________________________________
 
 _Polynomial::~_Polynomial ()
@@ -828,11 +842,11 @@ void    _Polynomial::Duplicate  (BaseRefConst tp) {
 //__________________________________________________________________________________
 
 
-HBLObjectRef _Polynomial::ExecuteSingleOp (long opCode, _List* arguments, _hyExecutionContext* context)
+HBLObjectRef _Polynomial::ExecuteSingleOp (long opCode, _List* arguments, _hyExecutionContext* context,HBLObjectRef cache)
 {
   switch (opCode) { // first check operations without arguments
     case HY_OP_CODE_TYPE: // Type
-      return Type();
+      return Type(cache);
   }
   
   _MathObject * arg0 = _extract_argument (arguments, 0UL, false);
@@ -840,24 +854,24 @@ HBLObjectRef _Polynomial::ExecuteSingleOp (long opCode, _List* arguments, _hyExe
   switch (opCode) { // next check operations without arguments or with one argument
     case HY_OP_CODE_SUB: // -
       if (arg0) {
-        return Sub(arg0);
+        return Sub(arg0,cache);
       } else {
-        return Minus();
+        return Minus(cache);
       }
     case HY_OP_CODE_ADD: // +
       if (arg0) {
-        return Add(arg0);
+        return Add(arg0,cache);
       } else {
-        return Sum ();
+        return Sum (cache);
       }
   }
   
   if (arg0) {
     switch (opCode) {
       case HY_OP_CODE_MUL: //*
-        return Mult(arg0);
+        return Mult(arg0,cache);
       case HY_OP_CODE_POWER: // ^
-        return Raise(arg0);
+        return Raise(arg0,cache);
     }
     
   }
@@ -899,9 +913,8 @@ _MathObject*    _Polynomial::IsANumber (bool returnLeading)
 }
 
 //__________________________________________________________________________________
-_MathObject* _Polynomial::Add (_MathObject* m)
-{
-    return Plus(m);
+_MathObject* _Polynomial::Add (_MathObject* m, HBLObjectRef cache) {
+    return Plus(m,false,cache);
 }
 //__________________________________________________________________________________
 
@@ -946,7 +959,7 @@ bool         _Polynomial::Equal(_MathObject* m)
 {
     bool result = false;
     if (m->ObjectClass() == POLYNOMIAL || m->ObjectClass() == NUMBER) {
-        _Polynomial * diff = (_Polynomial *)Sub(m);
+        _Polynomial * diff = (_Polynomial *)Sub(m, nil);
         if (diff) {
             _Constant * v = (_Constant*)diff->IsANumber(true);
             if (v) {
@@ -962,8 +975,7 @@ bool         _Polynomial::Equal(_MathObject* m)
 
 
 //__________________________________________________________________________________
-_MathObject* _Polynomial::Plus (_MathObject* m, bool subtract)
-{
+_MathObject* _Polynomial::Plus (_MathObject* m, bool subtract, HBLObjectRef cache) {
     long objectT = m->ObjectClass();
 
     if (objectT==1) { // a number
@@ -1010,9 +1022,9 @@ _MathObject* _Polynomial::Plus (_MathObject* m, bool subtract)
             if (theTerms->NumberOfTerms()) {
                 _Constant coef1 (theTerms->GetCoeff(0));
                 if (!subtract) {
-                    return p2->Plus (&coef1,false);
+                    return p2->Plus (&coef1,false,nil);
                 } else {
-                    _Polynomial *ppp = (_Polynomial*)p2->Plus (&coef1,true);
+                    _Polynomial *ppp = (_Polynomial*)p2->Plus (&coef1,true,nil);
                     hyFloat  *invC = ppp->theTerms->theCoeff;
                     for (long inv = 0; inv<ppp->theTerms->actTerms; inv++, invC++) {
                         (*invC) *= -1.0;
@@ -1037,7 +1049,7 @@ _MathObject* _Polynomial::Plus (_MathObject* m, bool subtract)
         if (p2->variableIndex.lLength == 0) {
             if (p2->theTerms->NumberOfTerms()) {
                 _Constant coef2 (p2->theTerms->GetCoeff(0));
-                return    Plus (&coef2,subtract);
+                return    Plus (&coef2,subtract,nil);
             } else {
                 if (!subtract) {
                     return new _Polynomial(*this);
@@ -1594,19 +1606,18 @@ _MathObject* _Polynomial::Plus (_MathObject* m, bool subtract)
 }
 
 //__________________________________________________________________________________
-_MathObject* _Polynomial::Sub (_MathObject* m) {
-    return Plus (m,true);
+_MathObject* _Polynomial::Sub (_MathObject* m,HBLObjectRef cache) {
+    return Plus (m,true,cache);
 }
 
 //__________________________________________________________________________________
-_MathObject* _Polynomial::Minus (void) {
+_MathObject* _Polynomial::Minus (HBLObjectRef cache) {
     _Constant min (-1.0);
-    return Mult (&min);
+    return Mult (&min, cache);
 }
 
 //__________________________________________________________________________________
-_MathObject* _Polynomial::Mult (_MathObject* m)
-{
+_MathObject* _Polynomial::Mult (_MathObject* m, HBLObjectRef cache) {
     long objectT = m->ObjectClass();
 
     if (objectT==NUMBER) { // a number or a monomial
@@ -1982,7 +1993,7 @@ _MathObject* _Polynomial::Mult (_MathObject* m)
         if (!variableIndex.countitems()) {
             if (theTerms->NumberOfTerms()) {
                 _Constant coef1 (theTerms->GetCoeff(0));
-                return p2->Mult (&coef1);
+                return p2->Mult (&coef1, nil);
             } else {
                 return new _Polynomial();
             }
@@ -1991,7 +2002,7 @@ _MathObject* _Polynomial::Mult (_MathObject* m)
         if (!p2->variableIndex.countitems()) {
             if (p2->theTerms->NumberOfTerms()) {
                 _Constant coef2 (p2->theTerms->GetCoeff(0));
-                return Mult (&coef2);
+                return Mult (&coef2,nil);
             } else {
                 return new _Polynomial();
             }
@@ -2233,8 +2244,7 @@ _MathObject* _Polynomial::Mult (_MathObject* m)
 
 
 //__________________________________________________________________________________
-_MathObject* _Polynomial::Raise (_MathObject* m)
-{
+_MathObject* _Polynomial::Raise (_MathObject* m, HBLObjectRef cache) {
     long objectT = m->ObjectClass();
     bool del = false;
     if (objectT==POLYNOMIAL) {
@@ -2269,12 +2279,12 @@ _MathObject* _Polynomial::Raise (_MathObject* m)
                 oldR = result;
                 nLength--;
                 if (bits[nLength]) {
-                    result=(_Polynomial*)result->Mult(this);
+                    result=(_Polynomial*)result->Mult(this,nil);
                     DeleteObject( oldR);
                 }
                 oldR = result;
                 if (nLength) {
-                    result=(_Polynomial*)result->Mult(result);
+                    result=(_Polynomial*)result->Mult(result,nil);
                     DeleteObject( oldR);
                 }
             }

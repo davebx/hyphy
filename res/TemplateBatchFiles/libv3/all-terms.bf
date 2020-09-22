@@ -28,6 +28,7 @@ namespace terms{
     replicates              = "replicates";
     data_type               = "datatype";
     devnull                 = "/dev/null";
+    _namespace              = "namespace";
 
     category            = "category";
     mixture             = "mixture";
@@ -88,6 +89,11 @@ namespace terms{
         upper_bound: "1e25"
     };
 
+    range_positive = {
+        lower_bound: "0",
+        upper_bound: "1e5"
+    };
+
     range_clamp_locals = {
         lower_bound: "0",
         upper_bound: "100"
@@ -142,6 +148,7 @@ namespace terms{
         PDF                 = "PDF";
         CDF                 = "CDF";
         dCDF                = "dCDF";
+        HMM                 = "HMM";
     }
 
 
@@ -366,6 +373,7 @@ namespace terms{
         set_branch_length       = "set-branch-length";
         constrain_branch_length = "constrain-branch-length";
         branch_length_string    = "branch-length-string";
+        branch_length_string_conditional = "branch-length-string-conditional";
         branch_length_scaler    = "branch length scaler";
         post_definition         = "post-definition";
         length                  = "length";
@@ -445,8 +453,10 @@ namespace terms{
         gamma_alpha   = "Shape parameter for the gamma distribution (alpha)";
         gamma_beta    = "Variance parameter for the gamma distribution (beta)";
         gamma_p_inv   = "Estimated proportion of invariant sites";
+        hmm_lambda    = "HMM rate switching parameter";
         before        = "before";
         after         = "after";
+        HMM           = "HMM";
     }
 
 
@@ -522,12 +532,3 @@ namespace terms{
     }
 
 }
-
-
-
-
-
-
-
-
-

@@ -223,7 +223,7 @@ void            _LikelihoodFunction::SetupCategoryCaches      (void)
                 }
 
                 if (varIndex <  myCats.lLength) {
-                    throw ("Currently, HyPhy can support at most one HMM or Constant on Partition variable per partition");
+                    throw _String("Currently, HyPhy can support at most one HMM or Constant on Partition variable per partition");
                     
                 }
 
@@ -252,7 +252,7 @@ void            _LikelihoodFunction::SetupCategoryCaches      (void)
 
                 categoryTraversalTemplate.AppendNewInstance(container);
             }
-            catch (const _String error) {
+            catch (const _String& error) {
                 BatchDelete (catVarReferences,catVarCounts,catVarOffsets,hmmAndCOP,varType,container);
                 HandleApplicationError (error);
                 return;
@@ -594,7 +594,8 @@ void            _LikelihoodFunction::PopulateConditionalProbabilities   (long in
                 }
 
                 if (runMode == _hyphyLFConditionProbsWeightedSum || runMode == _hyphyLFConditionProbsClassWeights || runMode == _hyphyLFConditionMPIIterate) {
-                    for                 (long currentCat        = hmmCatCount; currentCat <= catCount; currentCat++) {
+                    
+                    for                 (long currentCat        = (runMode == _hyphyLFConditionProbsClassWeights ? 0 : hmmCatCount); currentCat <= catCount; currentCat++) {
                         currentRateWeight *= ((_Matrix**)catWeigths->list_data)[currentCat]->theData[categoryValues.list_data[currentCat]];
                     }
 
@@ -888,6 +889,7 @@ _List*   _LikelihoodFunction::RecoverAncestralSequencesMarginal (long index, _Ma
                     if (scaleDiff > 0) {
                         ratio *= acquireScalerMultiplier(scaleDiff);
                     }
+                    //printf ("%g\n", ratio);
                     supportValues.theData[mappedBranchID*shiftForTheNode + siteID*alphabetDimension + currentChar] = ratio;
                 }
                 blockTree->AddBranchToForcedRecomputeList (branchID+leafCount);
@@ -896,7 +898,7 @@ _List*   _LikelihoodFunction::RecoverAncestralSequencesMarginal (long index, _Ma
 
     _SimpleList  conversion;
     _AVLListXL   conversionAVL (&conversion);
-    _String      codeBuffer    (unitLength);
+    _String      codeBuffer    ((unsigned long)unitLength);
     _List        *result       = new _List;
 
     for (long k = 0L; k < matrixSize; k++) {
@@ -1163,28 +1165,50 @@ void        _LikelihoodFunction::RunViterbi ( _Matrix & result,                 
 //_______________________________________________________________________________________________
 
 
-hyFloat mapParameterToInverval (hyFloat in, char type, bool inverse)
-{
+hyFloat mapParameterToInverval (hyFloat in, char type, bool inverse) {
     switch (type) {
-    case _hyphyIntervalMapExpit:
-        if (inverse) {
-            //return log (in / (1-in));
-            return tan (M_PI * (in - 0.5));
-        } else {
-            //return 1. / (1. + exp(-in));
-            return atan (in) * M_1_PI + 0.5;
-        }
-        break;
-    case _hyphyIntervalMapSqueeze:
-        if (inverse) {
-            return in/(1.-in);
-        } else {
-            return in/(1.+in);
-        }
-        break;
+        case _hyphyIntervalMapExpit:
+            if (inverse) {
+                return tan (M_PI * (in - 0.5));
+            } else {
+                return atan (in) * M_1_PI + 0.5;
+            }
+            break;
+        case _hyphyIntervalMapSqueeze:
+            if (inverse) {
+                return in/(1.-in);
+            } else {
+                return in/(1.+in);
+            }
+            break;
 
-    }
+        }
     return in;
+}
+
+//_______________________________________________________________________________________________
+
+
+hyFloat obtainDerivativeCorrection (hyFloat in, char type) {
+    switch (type) {
+        case _hyphyIntervalMapExpit: {
+            //return tan (M_PI * (in - 0.5));
+            hyFloat d = tan (M_PI * (in - 0.5));
+            return (1. + d*d)*M_PI;
+            break;
+        }
+        case _hyphyIntervalMapSqueeze:
+            return (1.) / ((1.-in) * (1.-in));
+            /*if (inverse) {
+                return in/(1.-in);
+            } else {
+                return in/(1.+in);
+            }*/
+            
+            break;
+
+        }
+    return 1.0;
 }
 
 

@@ -138,8 +138,16 @@ void _Formula::Initialize (void) {
 
 //__________________________________________________________________________________
 _Formula::_Formula (_Formula const& rhs) {
-    Initialize();
-    Duplicate (&rhs);
+    *this = rhs;
+}
+
+//__________________________________________________________________________________
+const _Formula& _Formula::operator =  (_Formula const& rhs) {
+    if (this != &rhs) {
+        Initialize();
+        Duplicate (&rhs);
+    }
+    return *this;
 }
 
 //__________________________________________________________________________________
@@ -1834,15 +1842,21 @@ long      _Formula::ExtractMatrixExpArguments (_List* storage) {
                       * next_op = GetIthTerm(i + 1UL);
 
               if (! cacheUpdated && next_op->CanResultsBeCached(this_op)) {
+                  /*
+                   StringToConsole("\n----\n");
+                  ObjectToConsole(FetchVar(LocateVarByName("k"))->Compute());
+                  NLToConsole();*/
+
                   _Stack temp;
                   this_op->Execute (temp);
+                  
 
                   _Matrix *currentArg  = (_Matrix*)temp.Pop(true),
                           *cachedArg   = (_Matrix*)((HBLObjectRef)(*resultCache)(cacheID)),
                           *diff        = nil;
 
                   if (cachedArg->ObjectClass() == MATRIX) {
-                      diff =  (_Matrix*)cachedArg->SubObj(currentArg);
+                      diff =  (_Matrix*)cachedArg->SubObj(currentArg, nil);
                   }
 
                   if (diff && diff->MaxElement() <= 1e-12) {
@@ -1938,7 +1952,7 @@ HBLObjectRef _Formula::Compute (long startAt, _VariableContainer const * nameSpa
                                 *diff        = nil;
 
                         if (cachedArg->ObjectClass() == MATRIX) {
-                            diff =  (_Matrix*)cachedArg->SubObj(currentArg);
+                            diff =  (_Matrix*)cachedArg->SubObj(currentArg, nil);
                         }
 
                         bool    no_difference = diff && diff->MaxElement() <= 1e-12;
@@ -1979,7 +1993,7 @@ HBLObjectRef _Formula::Compute (long startAt, _VariableContainer const * nameSpa
         } else {
 
             for (unsigned long i=startAt; i< term_count; i++) {
-                  if (!ItemAt (i)->Execute(*scrap_here, nameSpace, errMsg)) {
+                  if (!ItemAt (i)->Execute(*scrap_here, nameSpace, errMsg, call_count == 1)) {
                       wellDone = false;
                       break;
                   }
@@ -2076,6 +2090,15 @@ _Formula* _Formula::PatchFormulasTogether (const _Formula& op1, const _Formula& 
     _Formula * result = new _Formula;
     result->DuplicateReference(&op1);
     result->DuplicateReference(&op2);
+    result->theFormula.AppendNewInstance(new _Operation (op_code, 2));
+    return result;
+}
+
+//__________________________________________________________________________________
+_Formula* _Formula::PatchFormulasTogether (const _Formula& op1, HBLObjectRef op2, const char op_code) {
+    _Formula * result = new _Formula;
+    result->DuplicateReference(&op1);
+    result->theFormula.AppendNewInstance(new _Operation (op2));
     result->theFormula.AppendNewInstance(new _Operation (op_code, 2));
     return result;
 }
@@ -2819,7 +2842,7 @@ void    _Formula::ConvertToTree (bool err_msg) {
             } else {
                 theTree = (node<long>*)nodeStack(0);
             }
-        } catch (_String const e) {
+        } catch (_String const& e) {
             if (err_msg) {
                 HandleApplicationError(e);
             }

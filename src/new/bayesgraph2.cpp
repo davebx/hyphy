@@ -185,7 +185,7 @@ void _BayesianGraphicalModel::SerializeBGM (_StringBuffer & rec) {
                     temp *= yb;
                     mu += temp;
 
-                    _Matrix     * tauinv = (_Matrix *) tau.Inverse();
+                    _Matrix     * tauinv = (_Matrix *) tau.Inverse(nil);
                     temp = *tauinv;
                     temp *= mu;
                     mu = temp;
@@ -220,7 +220,7 @@ void _BayesianGraphicalModel::SerializeBGM (_StringBuffer & rec) {
                     rec << "}},{'PDF':'InverseWishart','ARG0':{{";
                     rec << _String(rho);
                     rec << "}}})*";
-                    rec << _String((_String*)tau.Inverse()->toStr());
+                    rec << _String((_String*)tau.Inverse(nil)->toStr());
                     rec << "})\"";
 
                     if (pa < num_parent_combos-1) {
@@ -435,7 +435,7 @@ hyFloat _BayesianGraphicalModel::ComputeContinuousScore (long node_id, _SimpleLi
         }
 
         if (theData.is_empty() == 0) {
-            throw ("Uh-oh, there's no node score cache nor is there any data matrix to compute scores from!");
+            throw _String("Uh-oh, there's no node score cache nor is there any data matrix to compute scores from!");
         }
 
     
@@ -569,7 +569,7 @@ hyFloat  _BayesianGraphicalModel::BottcherScore (_Matrix const& yb, _Matrix cons
       if (tau.check_dimension(1L,1L)) {
         temp_mat *= 1./(tau(0,0)); // just use scalar multiplication of the reciprocal
       } else {
-        _Matrix * tauinv = (_Matrix *) tau.Inverse();
+        _Matrix * tauinv = (_Matrix *) tau.Inverse(nil);
         temp_mat *= *tauinv;
         DeleteObject (tauinv);
       }
@@ -600,11 +600,11 @@ hyFloat  _BayesianGraphicalModel::BottcherScore (_Matrix const& yb, _Matrix cons
     
     //ReportWarning (_String("BottcherScore() calling Eigensystem on matrix ") & (_String *) temp_mat.toStr() );
     
-      _AssociativeList *  eigen       = (_AssociativeList *) temp_mat.Eigensystem();
+      _AssociativeList *  eigen       = (_AssociativeList *) temp_mat.Eigensystem(nil);
     
     // sometimes the eigendecomposition fails
       if ( eigen->countitems() == 0 ) {
-        throw "Eigendecomposition failed in bayesgraph2.cpp BottcherScore().";
+        throw _String("Eigendecomposition failed in bayesgraph2.cpp BottcherScore().");
       }
     
       _Matrix *        eigenvalues = (_Matrix *)eigen->GetByKey(0, MATRIX);
@@ -635,7 +635,7 @@ hyFloat  _BayesianGraphicalModel::BottcherScore (_Matrix const& yb, _Matrix cons
 
       temp_mat = next_mat;
     
-      _Matrix * scaleinv = (_Matrix *) scale.Inverse();
+      _Matrix * scaleinv = (_Matrix *) scale.Inverse(nil);
       temp_mat *= *scaleinv;  // N x N
       DeleteObject (scaleinv);
     
@@ -659,7 +659,7 @@ hyFloat  _BayesianGraphicalModel::BottcherScore (_Matrix const& yb, _Matrix cons
 
 //___________________________________________________________________________________________________
 
-void _check_impute_settings (long impute_maxsteps, long impute_burnin, long impute_samples) {
+void _check_impute_settings (long& impute_maxsteps, long& impute_burnin, long& impute_samples) {
   static const _String          kHYBgm_IMPUTE_MAXSTEPS    ("BGM_IMPUTE_MAXSTEPS"),
                                 kHYBgm_IMPUTE_BURNIN      ("BGM_IMPUTE_BURNIN"),
                                 kHYBgm_IMPUTE_SAMPLES     ("BGM_IMPUTE_SAMPLES");
@@ -669,7 +669,7 @@ void _check_impute_settings (long impute_maxsteps, long impute_burnin, long impu
   impute_samples  = hy_env :: EnvVariableGetNumber(kHYBgm_IMPUTE_SAMPLES, 0.);
 
   if (impute_maxsteps <= 0 || impute_burnin < 0 || impute_samples <= 0 || impute_samples > impute_maxsteps) {
-    throw "Invalid IMPUTE setting(s)";
+    throw _String("Invalid IMPUTE setting(s)");
   }
 }
 

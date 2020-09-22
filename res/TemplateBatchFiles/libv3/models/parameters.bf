@@ -135,7 +135,15 @@ function parameters.DeclareCategory.helper (dict, key, default) {
 function parameters.DeclareCategory (def) {
 	 ExecuteCommands ("category " + def[terms.id] + "= (" +
 	 			  Join (",",
-	 			  			utility.Map ({"0": terms.category.bins, "1": terms.category.weights, "2": terms.category.represent, "3": terms.category.PDF, "4": terms.category.CDF, "5": terms.lower_bound, "6": terms.upper_bound, "7": terms.category.dCDF},
+	 			  			utility.Map ({"0": terms.category.bins, 
+	 			  			             "1": terms.category.weights, 
+	 			  			             "2": terms.category.represent, 
+	 			  			             "3": terms.category.PDF, 
+	 			  			             "4": terms.category.CDF, 
+	 			  			             "5": terms.lower_bound, 
+	 			  			             "6": terms.upper_bound, 
+	 			  			             "7": terms.category.dCDF,
+	 			  			             "8": terms.category.HMM},
 	 			  						  "_value_",
 	 			  						  'parameters.DeclareCategory.helper(def[terms.category.category_parameters], _value_, "")')
 	 			  		) + ");");
@@ -494,7 +502,7 @@ lfunction parameters.IsIndependent(parameter) {
 
     GetString(info, ^ parameter, -1);
     
-    if (Type(info) == "AssociativeList") {
+    if (Type(info) == "AssociativeList") {    
         return (utility.CheckKey(info, "Local", "Matrix") && utility.CheckKey(info, "Global", "Matrix")) == FALSE;
     }
     return TRUE;
@@ -516,7 +524,6 @@ lfunction parameters.GetConstraint(parameter) {
 function parameters.SetConstraint(id, value, global_tag) {
     if (Type(id) == "String") {
         if (Abs(id)) {
-            //console.log ("`global_tag` `id` := " + value);
             ExecuteCommands("`global_tag` `id` := " + value);
         }
     } else {

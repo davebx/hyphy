@@ -292,7 +292,7 @@ void    MPISendString       (_String const& theMessage, long destID, bool isErro
 
     _FString*    sentVal = new _FString ((_String*)theMessage.makeDynamic());
     _Variable *   mpiMsgVar = CheckReceptacle (&hy_env::mpi_last_sent_message, kEmptyString, false);
-    mpiMsgVar->SetValue (sentVal, false);
+    mpiMsgVar->SetValue (sentVal, false, true, NULL);
     //setParameter (mpiLastSentMsg, &sentVal);
 
 }
@@ -741,7 +741,7 @@ void KillLFRecord (long lfID, bool completeKill) {
                 thisTree->CompileListOfModels (myVars);
                 _TreeIterator ti (thisTree, _HY_TREE_TRAVERSAL_POSTORDER);
                 while (_CalcNode* tNode = ti.Next()) {
-                    tNode->SetValue (new _Constant (tNode->ComputeBranchLength()),false);
+                    tNode->SetValue (new _Constant (tNode->ComputeBranchLength()),false,true,NULL);
                 }
                 thisTree->RemoveModel();
             }
@@ -1102,16 +1102,14 @@ _String*    _ExecutionList::FetchFromStdinRedirect (_String const * dialog_tag, 
             if (kwarg_tags && kwarg_tags->countitems() > currentKwarg) {
                 _List* current_tag = (_List*)kwarg_tags->GetItem(currentKwarg++);
                 
-                
                 // check to see if we need to match with the current dialog prompt
                 if (current_tag -> countitems() > 3UL) {
                     _String check_against = dialog_tag ? *dialog_tag : dialogPrompt;
-                    
                     if (check_against != *(_String*)current_tag->GetItem(3)) {
                         throw (1L);
                     }
                 }
-     
+                     
                 if (kwargs) {
                     user_argument = kwargs->GetByKey(*(_String*)current_tag->GetItem(0));
                 }
@@ -1394,7 +1392,7 @@ HBLObjectRef       _ExecutionList::Execute     (_ExecutionList* parent, bool ign
       CopyCLIToVariables();
     }
 
-  } catch (const _String err) {
+  } catch (const _String& err) {
     HandleApplicationError(err);
   }
 
@@ -1593,7 +1591,7 @@ void        _ExecutionList::CopyCLIToVariables(void) {
     cli->varList.Each ([this] (long index, unsigned long idx) -> void {
         _Variable * mv = LocateVar(index);
         if (mv->ObjectClass() == NUMBER) {
-            mv->SetValue (new _Constant (this->cli->values[idx].value),false);
+            mv->SetValue (new _Constant (this->cli->values[idx].value),false,true,NULL);
         }
     });
 }
@@ -2008,7 +2006,7 @@ bool        _ExecutionList::BuildList   (_String& s, _SimpleList* bc, bool proce
                       BuildList (currentLine,bc,true);
 
                       if (lif<0 || lif>=lLength) {
-                          throw ("'else' w/o an if to latch on to...");
+                          throw _String("'else' w/o an if to latch on to...");
                       }
 
                     
@@ -2943,10 +2941,10 @@ void      _ElementaryCommand::ExecuteCase12 (_ExecutionList& chain)
         ((_LikelihoodFunction*)likeFuncList(f))->Simulate(*ds,theExclusions,catValues,catNames);
 
         if (catValues) {
-            catValVar->SetValue(catValues,false);
+            catValVar->SetValue(catValues,false,true,NULL);
         }
         if (catNames) {
-            catNameVar->SetValue(catNames,false);
+            catNameVar->SetValue(catNames,false,true,NULL);
         }
 
         StoreADataSet (ds, resultingDSName);
@@ -3054,13 +3052,13 @@ void      _ElementaryCommand::ExecuteCase52 (_ExecutionList& chain) {
         }
 
         if (base_set.length() < alphabet_matrix->GetVDim ()) {
-            throw ("The alphabet is mis-specified; it either has redundant characters or multi-character/non-string entries");
+            throw _String("The alphabet is mis-specified; it either has redundant characters or multi-character/non-string entries");
         }
 
         long unit_size = ((_FString*)alphabet_matrix->GetFormula(1,0)->Compute())->get_str().to_long();
 
         if (unit_size < 1L) {
-            throw ("The evolutionary unit size in the alphabet matrix is mis-specified");
+            throw _String("The evolutionary unit size in the alphabet matrix is mis-specified");
         }
 
         _Formula* exclusion_formula = alphabet_matrix->GetFormula(1,1);
@@ -3073,7 +3071,7 @@ void      _ElementaryCommand::ExecuteCase52 (_ExecutionList& chain) {
         _TheTree * spawning_tree = (_TheTree*)tree_var;
 
         if (parameters.lLength>6 && (spawning_tree->CountTreeCategories()>1)) {
-            throw ("Can't use spool to file option in Simulate when the tree depends on category variables.");
+            throw _String("Can't use spool to file option in Simulate when the tree depends on category variables.");
         }
 
         if (given_state.length()>1) {
@@ -3081,7 +3079,7 @@ void      _ElementaryCommand::ExecuteCase52 (_ExecutionList& chain) {
             if ((given_state.length() >= unit_size)&&(given_state.length() % unit_size == 0)) {
                 site_count = given_state.length()/unit_size;
             } else {
-                throw ("Root state string is either too short or has length which is not divisible by the unit size");
+                throw _String("Root state string is either too short or has length which is not divisible by the unit size");
             }
         }
 
@@ -3193,13 +3191,19 @@ void      _ElementaryCommand::ExecuteCase52 (_ExecutionList& chain) {
         SetStatusLine ("Simulating Data");
         { // lf must be deleted before the referenced datafilters
             _LikelihoodFunction lf (filter_specification, nil);
+            
+            /*_SimpleList gl;
+            lf.GetGlobalVars(gl);
+            gl.Each ([] (long vi, unsigned long) -> void { StringToConsole(*LocateVar(vi)->GetName()); NLToConsole();});
+            */
+            
             lf.Simulate (*sim_dataset, exclusions, category_values, category_names, root_states, do_internals?(main_file?&spool_file:&kEmptyString):nil);
             SetStatusLine ("Idle");
         }
         
         
-        category_values_id->SetValue(category_values, false);
-        category_names_id->SetValue(category_names, false);
+        category_values_id->SetValue(category_values, false,true,NULL);
+        category_names_id->SetValue(category_names, false,true,NULL);
 
         
         StoreADataSet (sim_dataset, sim_name);
@@ -3493,7 +3497,7 @@ bool      _ElementaryCommand::Execute    (_ExecutionList& chain) {
         _Variable * result  = CheckReceptacle(&fName,blImport.Cut(0,blImport.length()-2),true);
         if (result) {
             _Matrix   * storage = new _Matrix (1,1,false,true);
-            result->SetValue(storage,false);
+            result->SetValue(storage,false,true,NULL);
             lastMatrixDeclared = result->get_index();
             if (!storage->ImportMatrixExp(theDump)) {
                 HandleApplicationError("Matrix import failed - the file has an invalid format.");
@@ -4139,7 +4143,8 @@ bool       _ElementaryCommand::MakeGeneralizedLoop  (_String*p1, _String*p2, _St
             // None != iterator_value, but we don't know
             
             _StringBuffer iterator_condition;
-            iterator_condition << "None!=" << (_String*)advance->parameters.GetItem (advance->parameters.countitems() -1);
+            iterator_condition << kEndIteration.Enquote() << "!=" << (_String*)advance->parameters.GetItem (advance->parameters.countitems() -1);
+            //StringToConsole(iterator_condition);NLToConsole();
             target.GetIthCommand(for_return)->MakeJumpCommand (&iterator_condition, for_return+1, target.lLength,target);
             
         } else {
@@ -4193,7 +4198,7 @@ bool       _ElementaryCommand::MakeGeneralizedLoop  (_String*p1, _String*p2, _St
                 }
             }
         }
-    } catch (const _String err) {
+    } catch (const _String& err) {
         for (long index = target.lLength - 1; index >= beginning; index--) {
             target.Delete (index);
         }
@@ -4434,7 +4439,7 @@ bool    _ElementaryCommand::ConstructDataSet (_String&source, _ExecutionList&tar
 
         } else {
             if (operation_type ==  kReconstructAncestors || operation_type == kSampleAncestors) {
-                if (arguments.countitems()>4UL || arguments.countitems()==1L) {
+                if (arguments.countitems()>5UL || arguments.countitems()==1L) {
                     throw  operation_type.Enquote() & " expects 1-4 parameters: likelihood function ident (mandatory), an matrix expression to specify the list of partition(s) to reconstruct/sample from (optional), and, for ReconstructAncestors, an optional MARGINAL flag, plus an optional DOLEAVES flag.";
                 }
                 _ElementaryCommand * dsc = new _ElementaryCommand (operation_type ==  kReconstructAncestors ? 38 : 50);
@@ -4466,7 +4471,7 @@ bool    _ElementaryCommand::ConstructDataSet (_String&source, _ExecutionList&tar
                 throw _String ("Expected DataSet ident = ReadDataFile(filename); or DataSet ident = SimulateDataSet (LikelihoodFunction); or DataSet ident = Combine (list of DataSets); or DataSet ident = Concatenate (list of DataSets); or DataSet ident = ReconstructAnscetors (likelihood function); or DataSet ident = SampleAnscetors (likelihood function) or DataSet	  dataSetid = ReadFromString (string);");
             }
         }
-    } catch (const _String err) {
+    } catch (const _String& err) {
         HandleErrorWhileParsing (err, source);
         return false;
     }
@@ -4629,7 +4634,7 @@ bool    _ElementaryCommand::ConstructDataSetFilter (_String&source, _ExecutionLi
         }
 
         datafilter_command->addAndClean (target,&arguments);
-    } catch (const _String err) {
+    } catch (const _String& err) {
         HandleErrorWhileParsing (err, source);
         DeleteObject (datafilter_command);
         return false;

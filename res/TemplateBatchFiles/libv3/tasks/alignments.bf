@@ -406,6 +406,22 @@ function alignments.ReadNucleotideAlignment(file_name, dataset_name, datafilter_
 }
 
 /**
+ * Take an input filter and check if it has duplicate sequences
+ * @name alignments.HasDuplicateSequences
+ * @param {String} filter_in - The name of an existing filter
+ * @param {Number} check_mode -
+      -1 : exact match
+      -2 : exact match + gaps match non-gaps");
+      -3 : superset filtering
+      -4 : partial match filtering
+ - @returns the number of *duplicate* sequences
+ */
+lfunction alignments.HasDuplicateSequences (filter_in, check_mode) {
+  GetDataInfo (duplicate_info, ^filter_in, check_mode);
+  return duplicate_info["UNIQUE_SEQUENCES"];
+}
+
+/**
  * Take an input filter, replace all identical sequences with a single copy
  * Optionally, rename the sequences to indicate copy # by adding ':copies'
  * @name alignments.CompressDuplicateSequences
@@ -416,7 +432,7 @@ function alignments.ReadNucleotideAlignment(file_name, dataset_name, datafilter_
  */
 lfunction alignments.CompressDuplicateSequences (filter_in, filter_out, rename) {
 
-    GetDataInfo (duplicate_info, ^filter_in, -2);    
+    GetDataInfo (duplicate_info, ^filter_in, -2);
     DataSetFilter ^filter_out = CreateFilter (^filter_in, 1, "", Join (",", duplicate_info["UNIQUE_INDICES"]));
 
     if (rename) {
@@ -516,6 +532,7 @@ lfunction alignments.TranslateCodonsToAminoAcids (sequence, offset, code) {
     l = Abs (sequence);
 	translation = "";
 	translation * (l/3+1);
+
 	for (k = offset; k < l; k += 3) {
 		codon = sequence[k][k+2];
 		if (code [utility.getGlobalValue("terms.code.mapping")] / codon) {
@@ -525,7 +542,7 @@ lfunction alignments.TranslateCodonsToAminoAcids (sequence, offset, code) {
 		    if (codon == "---") {
 			    translation * "-";
 		    } else {
-			    translation * "?";
+		        translation * "?";
 			}
 	    }
 	}
@@ -860,6 +877,9 @@ lfunction alignment.MapCodonsToAA(codon_sequence, aa_sequence, this_many_mm, map
     seqPos = 0;
     codon = codon_sequence[seqPos][seqPos + 2];
     currentAA = mapping[codon];
+    if (currentAA == 0) {
+        currentAA = "X";
+    }
 
     mismatch_count = 0;
 
@@ -874,12 +894,16 @@ lfunction alignment.MapCodonsToAA(codon_sequence, aa_sequence, this_many_mm, map
                     advance = 0;
                 //}
             } else {
-                mismatch_count += (aa_sequence[aaPos] != currentAA);
+                mismatch_count += (aa_sequence[aaPos] != currentAA && currentAA != "X");
                 if (this_many_mm == 1) {
                     if (mismatch_count == this_many_mm) {
                         translString * 0;
                         console.log (translString);
+                        console.log ("\n");
                         console.log (codon_sequence);
+                        console.log ("\n");
+                        console.log (aa_sequence);
+                        console.log ("\n");
                     }
                     assert(mismatch_count < this_many_mm, "A mismatch between codon and protein sequences at position " + aaPos + " (codon `seqPos`) : codon '" + codon_sequence[seqPos][seqPos + 2] + "'(`currentAA`) a.a. '`aa_sequence[aaPos]`'");
                 } else {
@@ -895,18 +919,21 @@ lfunction alignment.MapCodonsToAA(codon_sequence, aa_sequence, this_many_mm, map
 
         if (advance) {
             if (copy_codon) {
-                if (currentAA == "X") {
+                if (currentAA == "X" && mapping[codon] == "X") {
                     translString * "---";
                 } else {
                     translString * codon;
                 }
             } else {
                 //fprintf (stdout, "Skipping codon ", codon, "\n");
-                aaPos = aaPos - 1;
+                //aaPos = aaPos - 1;
             }
             seqPos += 3;
             codon = codon_sequence[seqPos][seqPos + 2];
             currentAA = mapping[codon];
+            if (currentAA == 0) {
+                currentAA = "X";
+            }
         }
     }
 
@@ -943,9 +970,9 @@ lfunction alignment.MapCodonsToAA(codon_sequence, aa_sequence, this_many_mm, map
 
 lfunction alignment.ExportPartitionedNEXUS (filter, breakPoints, trees, file, isCodon) {
     utility.ToggleEnvVariable ("DATA_FILE_PRINT_FORMAT", 4);
-    
+
     fprintf (file, CLEAR_FILE, KEEP_OPEN, ^filter, "\n");
-    
+
     breakPointsCount = utility.Array1D (breakPoints);
     partCount      = breakPointsCount + 1;
     currentStart    = 0;
@@ -964,10 +991,10 @@ lfunction alignment.ExportPartitionedNEXUS (filter, breakPoints, trees, file, is
             }
             currentEnd = currentEnd - 1;
         }
- 
+
         fprintf (file, "\tCHARSET span_", p + 1, " = ", currentStart + 1, "-", currentEnd + 1, ";\n");
-        
- 
+
+
         if (!lastPartition) {
             currentStart = breakPoints[p] + 1;
         }
@@ -977,7 +1004,7 @@ lfunction alignment.ExportPartitionedNEXUS (filter, breakPoints, trees, file, is
     for (p = 0; p < partCount; p += 1) {
         fprintf (file, "\tTREE tree_", p + 1, " = ", trees[p], ";\n");
     }
-    
+
     fprintf (file, "END;\n");
     utility.ToggleEnvVariable ("DATA_FILE_PRINT_FORMAT", None);
 }

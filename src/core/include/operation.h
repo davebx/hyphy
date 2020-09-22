@@ -61,14 +61,17 @@ _Variable * FetchVar (long, unsigned long = HY_ANY_OBJECT);
 class   _Operation : public BaseObj
 {
 
-    friend class _Formula;
-    friend class _Variable;
-    friend class _VariableContainer;
+    friend class    _Formula;
+    friend class    _Variable;
+    friend class    _VariableContainer;
+    
 protected:
     long           opCode;         // internal operation code
     long           numberOfTerms,  // 1 - unary, 2 - binary, etc
                    theData;
-    HBLObjectRef   theNumber;
+    
+    HBLObjectRef   theNumber,
+                   cachedResult;
 
 
 public:
@@ -93,14 +96,14 @@ public:
     virtual   void          Duplicate           (BaseRefConst);
     void      operator = (_Operation const&);
 
-    bool            Execute             (_Stack&, _VariableContainer const* = nil, _String* errMsg = nil); //execute this operation
+    bool            Execute             (_Stack&, _VariableContainer const* = nil, _String* errMsg = nil, bool canCache = false); //execute this operation
     // see the commend for _Formula::ExecuteFormula for the second argument
     virtual   void          StackDepth          (long&);
 
     bool            ExecutePolynomial   (_Stack&,_VariableContainer* nameSpace = nil, _String* errMsg = nil);
     virtual   BaseObj*      toStr               (unsigned long = 0UL);    //convert the op to string
 
-    virtual   void          Initialize          (bool = false);
+    virtual   void          Initialize          (bool = true);
     const _String&    GetCode             (void) {
         return (opCode>-1)&&(numberOfTerms>=0)?*(_String*)BuiltInFunctions(opCode): hy_global::kEmptyString;
     }

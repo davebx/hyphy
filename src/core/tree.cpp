@@ -83,7 +83,7 @@ _TheTree::_maxTimesCharWidth = 0.980392;
 
 _String const _TheTree::kTreeOutputLabel       ( "TREE_OUTPUT_BRANCH_LABEL"),
               _TheTree::kTreeOutputTLabel      ( "TREE_OUTPUT_BRANCH_TLABEL"),
-              _TheTree::kTreeOutputFSPlaceH       ( "__FONT_SIZE__");
+              _TheTree::kTreeOutputFSPlaceH    ( "__FONT_SIZE__");
 
 
 #define     DEGREES_PER_RADIAN          57.29577951308232286465
@@ -96,10 +96,12 @@ extern  long likeFuncEvalCallCount,
               matrix_exp_count;
 
 
-hyFloat          _lfScalerPower            = 100.,
-_lfScalerUpwards          = pow(2.,_lfScalerPower),
-_lfScalingFactorThreshold = 1./_lfScalerUpwards,
-_logLFScaler              = _lfScalerPower *log(2.);
+hyFloat             _lfScalerPower            = 100.,
+                    _lfScalerUpwards          = pow(2.,_lfScalerPower),
+                    _lfScalingFactorThreshold = 1./_lfScalerUpwards,
+                    _logLFScaler              = _lfScalerPower *log(2.),
+                    _lfMaxScaler              = DBL_MAX * 1.e-10,
+                    _lfMinScaler              = 1./_lfMaxScaler;
 
 
 
@@ -109,15 +111,66 @@ _scalerDividers;
 #ifdef _SLKP_DEBUG_
 
 /*----------------------------------------------------------------------------------------------------------*/
-void echoNodeList (_SimpleList& theNodes, _SimpleList& leaves, _SimpleList& iNodes)
-{
+void echoNodeList (_SimpleList& theNodes, _SimpleList& leaves, _SimpleList& iNodes, _SimpleList& flatParents) {
     for (long n = 0; n < theNodes.lLength; n++) {
-        node<long>* nd = (node<long>*)(theNodes(n)<leaves.lLength?leaves(theNodes(n)):iNodes(theNodes(n)-leaves.lLength));
-        printf ("%ld %ld %s\n", n, theNodes(n), LocateVar(nd->in_object)->GetName()->sData);
+        bool is_leaf = theNodes(n)<leaves.lLength;
+        node<long>* nd = (node<long>*)(is_leaf?leaves(theNodes(n)):iNodes(theNodes(n)-leaves.lLength));
+        long children = 0;
+        if (!is_leaf) {
+            long myIndex = theNodes(n)-leaves.lLength;
+            flatParents.Each ([&](long v, unsigned long)->void {if (v == myIndex) children++;});
+        }
+        printf ("%ld %ld %s (%d)\n", n, theNodes(n), LocateVar(nd->in_object)->GetName()->get_str(), children);
     }
 }
 
 #endif
+
+/*----------------------------------------------------------------------------------------------------------*/
+
+hyFloat _computeReductionScaler (hyFloat currentScaler, hyFloat sum, long& didScale) {
+    if (currentScaler > _lfMinScaler) {
+       didScale   = -1;
+       sum       *= _lfScalingFactorThreshold;
+                                   
+       hyFloat tryScale2 = currentScaler * _lfScalingFactorThreshold,
+               scaler = _lfScalingFactorThreshold;
+       
+       while (sum > _lfScalerUpwards && tryScale2 > _lfMinScaler) {
+           sum     *= _lfScalingFactorThreshold;
+           currentScaler  = tryScale2;
+           tryScale2 *= _lfScalingFactorThreshold;
+           scaler *= _lfScalingFactorThreshold;
+           didScale --;
+       }
+
+       return scaler;
+    }
+    return NAN;
+}
+
+hyFloat _computeBoostScaler (hyFloat currentScaler, hyFloat sum, long& didScale) {
+    if (currentScaler < _lfMaxScaler) {
+       didScale                                            = 1;
+       sum                                                *= _lfScalerUpwards;
+       
+       hyFloat tryScale2 = currentScaler * _lfScalerUpwards,
+               scaler = _lfScalerUpwards;
+        
+       while (sum < _lfScalingFactorThreshold && tryScale2 < _lfMaxScaler) {
+           sum     *= _lfScalerUpwards;
+           currentScaler  = tryScale2;
+           tryScale2 *= _lfScalerUpwards;
+           scaler *= _lfScalerUpwards;
+           didScale ++;
+       }
+       return scaler;
+    } /*else {
+#pragma omp critical
+        printf ("Overflow in _computeBoostScaler %15.12lg\n", currentScaler);
+    }*/
+    return NAN;
+}
 
 /*----------------------------------------------------------------------------------------------------------*/
 
@@ -401,7 +454,7 @@ void    _TheTree::PostTreeConstructor (bool make_copy, _AssociativeList* meta) {
       if (theRoot->get_num_nodes() <= 2) { // rooted tree - check
         if (accept_rooted == false) {
           
-          long node_index = theRoot->get_data();
+          //long node_index = theRoot->get_data();
           bool recurse = false;
           
           if (theRoot->get_num_nodes() == 2) {
@@ -635,7 +688,7 @@ _String    _TheTree::FinalizeNode (node<long>* nodie, long number , _String node
                             expressionToSolveFor = new _Formula (*result);
                             for (unsigned long cc = 0; cc < cNt.categoryVariables.countitems(); cc++) {
                                _CategoryVariable * thisCC = cNt.get_ith_category (cc);
-                              thisCC -> SetValue (new _Constant(thisCC->Mean()), false);
+                              thisCC -> SetValue (new _Constant(thisCC->Mean()), false, true, NULL);
                             }
                             settings.parser_cache->Insert ((BaseRef)nodeModelID, (long)expressionToSolveFor, false, false);
                         }
@@ -648,14 +701,14 @@ _String    _TheTree::FinalizeNode (node<long>* nodie, long number , _String node
                         _Variable * solveForMe = LocateVar (cNt.iVariables->list_data[1]);
                         hyFloat modelP = expressionToSolveFor->Brent (solveForMe,solveForMe->GetLowerBound(), solveForMe->GetUpperBound(), 1e-6, nil, val.Value());
                         ReportWarning (_String("Branch parameter of ") & nodeName.Enquote() &" set to " & modelP);
-                        cNt.GetIthIndependent(0) ->SetValue(new _Constant (modelP), false);
+                        cNt.GetIthIndependent(0) ->SetValue(new _Constant (modelP), false,true, NULL);
                         use_direct_value = false;
                     }
                 }
             }
 
             if (use_direct_value) {
-                cNt.GetIthIndependent(0)->SetValue (&val);
+                cNt.GetIthIndependent(0)->SetValue (&val,true,true,NULL);
                 ReportWarning (_String("Branch parameter of ") & nodeName&" set to " & nodeValue);
             }
         } else {
@@ -667,7 +720,7 @@ _String    _TheTree::FinalizeNode (node<long>* nodie, long number , _String node
 
     if (nodeVar == NULL) return kEmptyString;
 
-    nodeVar->SetValue (&val);
+    nodeVar->SetValue (&val,true,true,NULL);
 
     node_parameters.Clear();
     nodeValue.Clear();
@@ -799,11 +852,11 @@ bool _TheTree::AllBranchesHaveModels (long matchSize) const {
 
 //__________________________________________________________________________________
 
-HBLObjectRef _TheTree::ExecuteSingleOp (long opCode, _List* arguments, _hyExecutionContext* context) {
+HBLObjectRef _TheTree::ExecuteSingleOp (long opCode, _List* arguments, _hyExecutionContext* context, HBLObjectRef cache) {
 
     switch (opCode) {
        case HY_OP_CODE_TYPE: // Type
-        return Type();
+        return Type(cache);
         break;
     }
 
@@ -812,7 +865,7 @@ HBLObjectRef _TheTree::ExecuteSingleOp (long opCode, _List* arguments, _hyExecut
     if (arg0) {
       switch (opCode) {
         case HY_OP_CODE_TEXTREESTRING: // TEXTreeString
-          return TEXTreeString(arg0);
+          return TEXTreeString(arg0, cache);
        }
 
       _MathObject * arg1 = _extract_argument (arguments, 1UL, false);
@@ -820,7 +873,7 @@ HBLObjectRef _TheTree::ExecuteSingleOp (long opCode, _List* arguments, _hyExecut
       if (arg1) {
         switch (opCode) {
           case HY_OP_CODE_PSTREESTRING: //PlainTreeString
-            return PlainTreeString(arg0,arg1);
+            return PlainTreeString(arg0,arg1, cache);
         }
       }
     }
@@ -934,7 +987,6 @@ node<nodeCoord>* _TheTree::AlignedTipsMapping (node<long>* iterator, hyFloat& cu
         long descendants = theRoot->get_num_nodes();
         node<nodeCoord>* aRoot = new node<nodeCoord>; // reslove rootedness here
         aRoot->in_object.varRef = -1;
-        aRoot->go_next(); // dumbass initialization for later
         if (rooted == UNROOTED || !respectRoot) {
             for (long k=1L; k<=descendants; k++) {
                 aRoot->add_node(*AlignedTipsMapping(theRoot->go_down(k), current_offset));
@@ -1009,7 +1061,7 @@ hyFloat       _TheTree::DetermineBranchLengthGivenScalingParameter (long varRef,
             branchLength = HY_REPLACE_BAD_BRANCH_LENGTH_WITH_THIS;
         }
     } else {
-        auto match_pattern = [&] (long local_idx, long template_index, unsigned long index) -> bool {
+        auto match_pattern = [&] (long local_idx, long template_index, unsigned long index) -> void {
             _Variable * local_parameter = LocateVar(local_idx);
             if (local_parameter->GetName()->EndsWith(matchString)) {
                 branchLength = local_parameter->Compute()->Value();
@@ -1214,7 +1266,7 @@ hyFloat _TheTree::PSStringWidth (_String const& s) {
 }
 
 //__________________________________________________________________________________
-HBLObjectRef _TheTree::PlainTreeString (HBLObjectRef p, HBLObjectRef p2) {
+HBLObjectRef _TheTree::PlainTreeString (HBLObjectRef p, HBLObjectRef p2, HBLObjectRef cache) {
     // 20180618 TODO:  SLKP this needs review and possibly deprecation
     
     
@@ -1658,7 +1710,7 @@ HBLObjectRef _TheTree::PlainTreeString (HBLObjectRef p, HBLObjectRef p2) {
         ReportWarning ("An invalid 2nd parameter was passed to PSTreeString.");
     }
     res->TrimSpace();
-    return new _FString (res);
+    return _returnStringOrUseCache(res, cache);
 }
 
 
@@ -2216,11 +2268,27 @@ void _TheTree::RemoveModel (void) {
 
 //__________________________________________________________________________________
 
-void _TheTree::ScanContainerForVariables (_AVLList& l,_AVLList& l2, _AVLListX * tagger, long weight) const {
-    unsigned long traversal_order = 0UL;
-    _TreeIterator ti (this,  _HY_TREE_TRAVERSAL_POSTORDER);
+void _TheTree::ScanContainerForVariables (_AVLList& l,_AVLList& l2, _AVLListX * tagger, long weight, _AVLListX * map_variables_to_nodes) const {
+    /**
+        map_variables_to_nodes, if supplied, will be used to map variable IDs to "post-order" node index of nodes that they affect, IF they only affect one node; otherwise they will be tagged with '-1'
+     */
+    
+    unsigned long traversal_order = 0UL,
+                  leaf_index = 0UL,
+                  int_index = 0UL;
+    
+    _TreeIterator ti (this,  _HY_TREE_TRAVERSAL_POSTORDER | fTreeIteratorTraversalSkipRoot);
     while   (_CalcNode* iterator = ti.Next()) {
-        iterator->ScanContainerForVariables(l,l2, tagger, weight +  flatNodes.lLength + flatLeaves.lLength - traversal_order);
+        bool is_leaf = ti.IsAtLeaf();
+        
+        
+        iterator->ScanContainerForVariables(l,l2, tagger, weight +  flatNodes.lLength + flatLeaves.lLength - traversal_order, map_variables_to_nodes, is_leaf ? leaf_index : int_index + flatLeaves.lLength);
+        
+        if (is_leaf) {
+            leaf_index ++;
+        } else {
+            int_index ++;
+        }
         traversal_order ++;
     }
 }
@@ -2228,7 +2296,7 @@ void _TheTree::ScanContainerForVariables (_AVLList& l,_AVLList& l2, _AVLListX * 
 //__________________________________________________________________________________
 
 void _TheTree::ScanAndAttachVariables (void) const {
-    _TreeIterator ti (this,  _HY_TREE_TRAVERSAL_POSTORDER);
+    _TreeIterator ti (this,  _HY_TREE_TRAVERSAL_POSTORDER | fTreeIteratorTraversalSkipRoot);
     while   (_CalcNode* iterator = ti.Next()) {
         iterator->ScanAndAttachVariables();
     }
@@ -2237,7 +2305,7 @@ void _TheTree::ScanAndAttachVariables (void) const {
 //__________________________________________________________________________________
 
 void _TheTree::ScanForDVariables (_AVLList& l,_AVLList& l2) const {
-    _TreeIterator ti (this,  _HY_TREE_TRAVERSAL_POSTORDER);
+    _TreeIterator ti (this,  _HY_TREE_TRAVERSAL_POSTORDER | fTreeIteratorTraversalSkipRoot);
     while   (_CalcNode* iterator = ti.Next()) {
       iterator->ScanForDVariables(l,l2);
     }
@@ -2248,8 +2316,8 @@ void _TheTree::ScanForDVariables (_AVLList& l,_AVLList& l2) const {
 void _TheTree::ScanForGVariables (_AVLList& li, _AVLList& ld, _AVLListX * tagger, long weight) const {
     _SimpleList cL;
     _AVLList    cLL (&cL);
-
-    _TreeIterator ti (this,  _HY_TREE_TRAVERSAL_POSTORDER);
+    _TreeIterator ti (this,  _HY_TREE_TRAVERSAL_POSTORDER | fTreeIteratorTraversalSkipRoot );
+    
     while   (_CalcNode* iterator = ti.Next()) {
 
         _Formula *explicitFormMExp = iterator->GetExplicitFormModel ();
@@ -2289,7 +2357,7 @@ void _TheTree::ScanForGVariables (_AVLList& li, _AVLList& ld, _AVLListX * tagger
 //__________________________________________________________________________________
 
 void _TheTree::ScanForCVariables (_AVLList& lcat) const {
-    _TreeIterator ti (this,  _HY_TREE_TRAVERSAL_POSTORDER);
+    _TreeIterator ti (this,  _HY_TREE_TRAVERSAL_POSTORDER | fTreeIteratorTraversalSkipRoot);
     while   (_CalcNode* iterator = ti.Next()) {
         for (unsigned long i = 0UL; i < iterator->categoryVariables.lLength; i++) {
             lcat.Insert ((BaseRef)iterator->categoryVariables.Element(i));
@@ -2300,7 +2368,7 @@ void _TheTree::ScanForCVariables (_AVLList& lcat) const {
 //__________________________________________________________________________________
 
 bool _TheTree::HasChanged (bool) {
-    _TreeIterator ti (this,  _HY_TREE_TRAVERSAL_POSTORDER);
+    _TreeIterator ti (this,  _HY_TREE_TRAVERSAL_POSTORDER | fTreeIteratorTraversalSkipRoot);
     while   (_CalcNode* iterator = ti.Next()) {
         if (iterator->HasChanged()) {
             return true;
@@ -2319,7 +2387,7 @@ bool _TheTree::HasChanged2 (void) {
     }
   }
 
-  _TreeIterator ti (this,  _HY_TREE_TRAVERSAL_POSTORDER);
+  _TreeIterator ti (this,  _HY_TREE_TRAVERSAL_POSTORDER | fTreeIteratorTraversalSkipRoot);
   while   (_CalcNode* iterator = ti.Next()) {
     if (iterator->_VariableContainer::HasChanged()) {
       return true;
@@ -2609,32 +2677,31 @@ long    _TheTree::ComputeReleafingCostChar (_DataSetFilter const* dsf, long firs
     const char *pastState = dsf->GetColumn(firstIndex),
                *thisState = dsf->GetColumn(secondIndex);
 
+    long rootIndex = flatTree.lLength - 1,
+         theCost = child_count->list_data[rootIndex],
+         offset = flatLeaves.countitems();
 
     bool * marked_nodes = (bool*) alloca (sizeof(bool) * flatTree.lLength);
     InitializeArray(marked_nodes, flatTree.lLength, false);
-    
-    flatLeaves.Each ([&] (long node, unsigned long node_index) -> void {
-        long f = dsf->theNodeMap.list_data[node_index];
-        if (thisState[f] != pastState[f]) {
-            marked_nodes [flatParents.get(node_index)] = true;
-        }
-    });
+     
+    for (long node_index = 0L; node_index < flatLeaves.lLength; node_index++) {
+         long seq_index = dsf->theNodeMap.list_data[node_index];
+         if (thisState[seq_index] != pastState[seq_index]) {
+             /*long parentIndex = flatParents.list_data[node_index];
+             while (marked_nodes[parentIndex] == false && parentIndex < rootIndex) {
+                 marked_nodes[parentIndex]  = true;
+                 theCost += child_count->list_data [parentIndex];
+                 parentIndex = flatParents.list_data[parentIndex+offset];
+             }*/
+             marked_nodes [flatParents.list_data[node_index]] = true;
+         }
+    }
 
-    long theCost = 0L,
-         offset = flatLeaves.countitems();
-    
-
-    for (long i=0; i<flatTree.lLength; i++) {
+    // the root will always be changed, so don't need to check it
+    for (long i=0; i<flatTree.lLength - 1; i++) {
         if (marked_nodes[i]) {
-            long myParent = flatParents.get (i + offset);
-            if (myParent >= 0) {
-                marked_nodes [myParent] = true;
-            }
-            if (child_count) {
-                theCost += child_count->get (i);
-            } else {
-                theCost += ((node <long>*)(flatNodes.list_data[i]))->get_num_nodes();
-            }
+            marked_nodes [flatParents.list_data [i + offset]] = true;
+            theCost += child_count->list_data [i];
         }
     }
 
@@ -2654,7 +2721,7 @@ void    _TheTree::ClearConstraints (void) {
 
 //_______________________________________________________________________________________________
 
-long    _TheTree::ComputeReleafingCost (_DataSetFilter const* dsf, long firstIndex, long secondIndex, _SimpleList* traversalTags, long orderIndex) const {
+long    _TheTree::ComputeReleafingCost (_DataSetFilter const* dsf, long firstIndex, long secondIndex, _SimpleList* traversalTags, long orderIndex, _SimpleList const* childCount) const {
 
     long        filterL = dsf->GetPatternCount();
 
@@ -2668,22 +2735,44 @@ long    _TheTree::ComputeReleafingCost (_DataSetFilter const* dsf, long firstInd
         marked_nodes [this->flatParents.list_data[di]] = true;
     });
     
-    long theCost = 0;
+    long theCost = 0,
+         rootIndex = flatTree.lLength - 1;
 
-
-    for (long i=0; i<flatTree.lLength; i++) {
-        if (marked_nodes[i]) {
-            long myParent    =  flatParents.list_data[flatLeaves.lLength + i];
-            if (myParent >= 0) {
-                marked_nodes[myParent] = true;
+    // don't check the root; it is always "dirty"
+    
+    if (childCount) {
+        if (traversalTags && orderIndex) {
+            for (long i=0; i<rootIndex; i++) {
+               if (marked_nodes[i]) {
+                   marked_nodes[flatParents.list_data[flatLeaves.lLength + i]] = true;
+                   theCost += childCount->list_data[i];
+               } else {
+                   long theIndex = filterL * i + orderIndex;
+                   traversalTags->list_data[theIndex/_HY_BITMASK_WIDTH_] |= bitMaskArray.masks[theIndex%_HY_BITMASK_WIDTH_];
+               }
+           }
+        }
+        
+        for (long i=0; i<rootIndex; i++) {
+            if (marked_nodes[i]) {
+                marked_nodes[flatParents.list_data[flatLeaves.lLength + i]] = true;
+                theCost += childCount->list_data[i];
             }
-            theCost         += ((node <long>*)(flatNodes.list_data[i]))->get_num_nodes();
-        } else if (traversalTags && orderIndex) {
-            long theIndex = filterL * i + orderIndex;
-            traversalTags->list_data[theIndex/_HY_BITMASK_WIDTH_] |= bitMaskArray.masks[theIndex%_HY_BITMASK_WIDTH_];
+        }
+    } else {
+        for (long i=0; i<rootIndex; i++) {
+            if (marked_nodes[i]) {
+                marked_nodes[flatParents.list_data[flatLeaves.lLength + i]] = true;
+                theCost += ((node <long>*)(flatNodes.list_data[i]))->get_num_nodes();
+            } else if (traversalTags && orderIndex) {
+                long theIndex = filterL * i + orderIndex;
+                traversalTags->list_data[theIndex/_HY_BITMASK_WIDTH_] |= bitMaskArray.masks[theIndex%_HY_BITMASK_WIDTH_];
+            }
         }
     }
 
+    theCost += ((node <long>*)(flatNodes.list_data[rootIndex]))->get_num_nodes();
+    
     return theCost;
 
 }
@@ -2851,69 +2940,186 @@ void        _TheTree::ExponentiateMatrices  (_List& expNodes, long tc, long catI
 
 /*----------------------------------------------------------------------------------------------------------*/
 
-long        _TheTree::DetermineNodesForUpdate   (_SimpleList& updateNodes, _List* expNodes, long catID, long addOne, bool canClear) {
-  nodesToUpdate.Populate (flatLeaves.lLength + flatTree.lLength, 0, 0);
+long        _TheTree::DetermineNodesForUpdate   (_SimpleList& updateNodes, _List* expNodes, long catID, long addOne, bool canClear,
+                                                _AVLListX * var_to_node_map, _AVLList * changed_variables) {
   _CalcNode       *currentTreeNode;
   long            lastNodeID = -1;
-  
+  unsigned long   tagged_node_count = 0UL;
+
     // look for nodes with model changes and mark the path up to the root as needing an update
-  
+    
   #define DIRECT_INDEX(N) (flatParents.list_data[N]+flatLeaves.lLength)
-  
-  if (addOne >= 0) {
-    nodesToUpdate.list_data[addOne] = 2;
-  }
-  
-  if (forceRecalculationOnTheseBranches.nonempty()) {
-    forceRecalculationOnTheseBranches.Each ([this] (long value, unsigned long) -> void {
-      this->nodesToUpdate.list_data [value] = 2L;
-    });
     
-    if (canClear) {
-      forceRecalculationOnTheseBranches.Clear();
-    }
-  }
-  
-  for (unsigned long nodeID = 0UL; nodeID < nodesToUpdate.lLength - 1UL; nodeID++) {
-    bool    isLeaf     = nodeID < flatLeaves.lLength;
-    
-    if (isLeaf) {
-      currentTreeNode = (((_CalcNode**) flatCLeaves.list_data)[nodeID]);
-    } else {
-      currentTreeNode = (((_CalcNode**) flatTree.list_data)  [nodeID - flatLeaves.lLength]);
-    }
-    
-    if (currentTreeNode->NeedNewCategoryExponential (catID)) {
-      if (expNodes) {
-        (*expNodes) << currentTreeNode;
-        lastNodeID = nodeID;
+  auto _handle_node = [&] (long node_id, bool do_list)->void {
+      bool    isLeaf     = node_id < flatLeaves.lLength;
+      
+      if (isLeaf) {
+        currentTreeNode = (((_CalcNode**) flatCLeaves.list_data)[node_id]);
       } else {
-        currentTreeNode->RecomputeMatrix (catID, categoryCount, nil);
+        currentTreeNode = (((_CalcNode**) flatTree.list_data)  [node_id - flatLeaves.lLength]);
       }
       
-      nodesToUpdate.list_data[nodeID] = 2;
-    }
+      if (currentTreeNode->NeedNewCategoryExponential (catID)) {
+        if (expNodes) {
+          (*expNodes) << currentTreeNode;
+          lastNodeID = node_id;
+        } else {
+          currentTreeNode->RecomputeMatrix (catID, categoryCount, nil);
+        }
+        
+        if (do_list) {
+            nodesToUpdate.list_data[node_id] = 2;
+            tagged_node_count++;
+        }
+      }
+      
+      if (do_list && nodesToUpdate.list_data[node_id]) {
+        long parent_index = DIRECT_INDEX(node_id);
+        //if (nodesToUpdate.list_data[parent_index] == 0) {
+            nodesToUpdate.list_data[parent_index] = 2;
+            tagged_node_count++;
+        //}
+      }
+  };
+
+  bool already_done = false;
+  if (changed_variables && var_to_node_map && changed_variables->countitems() < 8 && forceRecalculationOnTheseBranches.empty()) {
+      already_done = true;
+      //_SimpleList   nodes;
+      updateNodes.RequestSpace (changed_variables->countitems());
+      _AVLList uniques (&updateNodes);
+
+      for (long i = 0L; i < changed_variables->dataList->lLength; i++) {
+          long var_index = changed_variables->dataList->list_data[i];
+          long node_index = var_to_node_map->FindAndGetXtra ((BaseRefConst)var_index,-1L);
+          if (node_index < 0) {
+              already_done = false;
+              break;
+          }
+          //updateNodes << node_index;
+          uniques.InsertNumber(node_index);
+      }
+      //already_done = false;
+      //if (likeFuncEvalCallCount == 7) {
+      //    ObjectToConsole(&updateNodes); NLToConsole();
+      //}
+      if (already_done) {
+          if (addOne >= 0) {
+              uniques.InsertNumber(addOne);
+          }
+          long i = 0L;
+          for (; i < updateNodes.lLength; i++) {
+              _handle_node (updateNodes.get (i), false);
+          }
+          //if (likeFuncEvalCallCount == 7) {
+          //    ObjectToConsole(&updateNodes); NLToConsole();
+          //}
+          
+
+          for (long i2 = 0; i2 < i; i2++) {
+              long  my_index = updateNodes.get (i2),
+                    parent_index = flatParents.list_data[my_index];
+                            
+              while (parent_index >= 0) {
+                  long dir_index = parent_index + flatLeaves.lLength;
+                  //if (uniques.InsertNumber(dir_index) >= 0) { // performed insertion
+                  //    node<long>* parent_node = (node<long>*)flatNodes.get (parent_index);
+                  //}
+                  uniques.InsertNumber(dir_index);
+                  parent_index = flatParents.list_data[dir_index];
+              }
+          }
+
+          _SimpleList children;
+          
+          /*nodesToUpdate.Populate (flatTree.lLength, 0, 0);
+          
+          for (long i = 0; i < updateNodes.lLength; i++) {
+              long tagged_node = updateNodes.get (i);
+              if (tagged_node >= flatLeaves.lLength) {
+                  nodesToUpdate.list_data [tagged_node - flatLeaves.lLength] = true;
+              }
+          }
+          
+          for (long i = 0; i < flatParents.lLength - 1; i++) {
+              long my_parent = flatParents.list_data [i];
+              if (nodesToUpdate.list_data[my_parent]) {
+                  children << i;
+              }
+          }*/
+          
+          for (long i = 0; i < flatParents.lLength - 1; i++) {
+              long my_parent = flatParents.list_data [i] + flatLeaves.lLength;
+              if (uniques.FindLong (my_parent) >= 0) {
+                  children << i;
+              }
+          }
+          
+          for (long i = 0; i < children.lLength; i++) {
+              uniques.InsertNumber(children.get (i));
+          }
+          
+           if (uniques.countitems() <= 32) {
+              updateNodes.BubbleSort();
+          } else {
+              uniques.ReorderList();
+          }
+          
+          updateNodes.Pop();
+          
+      } else {
+          updateNodes.Clear(false);
+      }
+  }
     
-    if (nodesToUpdate.list_data[nodeID]) {
-      nodesToUpdate.list_data[DIRECT_INDEX(nodeID)] = 2;
-    }
-  }
-  
-    // one more pass to pick up all DIRECT descendants of changed internal nodes
-  
-  for (unsigned long nodeID = 0UL; nodeID < nodesToUpdate.lLength - 1UL; nodeID++)
-    if (nodesToUpdate.list_data[nodeID] == 0 && nodesToUpdate.list_data[DIRECT_INDEX(nodeID)] == 2) {
-      nodesToUpdate.list_data[nodeID] = 1;
-    }
-  
-    // write out all changed nodes
-  
-  for (unsigned long nodeID = 0UL; nodeID < nodesToUpdate.lLength - 1UL; nodeID++) {
-    if (nodesToUpdate.list_data[nodeID]) {
-      updateNodes << nodeID;
-    }
-  }
-  
+    
+   if (!already_done) {
+       nodesToUpdate.Populate (flatLeaves.lLength + flatTree.lLength, 0, 0);
+       
+       if (addOne >= 0) {
+         nodesToUpdate.list_data[addOne] = 2;
+         tagged_node_count++;
+       }
+       
+       if (forceRecalculationOnTheseBranches.nonempty()) {
+         forceRecalculationOnTheseBranches.Each ([this] (long value, unsigned long) -> void {
+           this->nodesToUpdate.list_data [value] = 2L;
+         });
+         tagged_node_count += forceRecalculationOnTheseBranches.countitems();
+         
+         if (canClear) {
+           forceRecalculationOnTheseBranches.Clear();
+         }
+       }
+
+       for (unsigned long nodeID = 0UL; nodeID < nodesToUpdate.lLength - 1UL; nodeID++) {
+            _handle_node (nodeID, true);
+       }
+       
+      
+        // one more pass to pick up all DIRECT descendants of changed internal nodes
+      
+       for (unsigned long nodeID = 0UL; nodeID < nodesToUpdate.lLength - 1UL; nodeID++)
+        if (nodesToUpdate.list_data[nodeID] == 0 && nodesToUpdate.list_data[DIRECT_INDEX(nodeID)] == 2) {
+          nodesToUpdate.list_data[nodeID] = 1;
+          tagged_node_count++;
+        }
+       
+ 
+        // write out all changed nodes
+      updateNodes.RequestSpace(tagged_node_count);
+      // 20200610: for larger trees, this helps with reducing memory allocations
+      for (unsigned long nodeID = 0UL; nodeID < nodesToUpdate.lLength - 1UL; nodeID++) {
+        if (nodesToUpdate.list_data[nodeID]) {
+          updateNodes << nodeID;
+        }
+      }
+   }
+    
+   /*printf ("%ld ", likeFuncEvalCallCount);
+   ObjectToConsole(&updateNodes);
+   printf ("\n");*/
+
   if (expNodes && expNodes->countitems() == 1) {
     return lastNodeID;
   }
@@ -3017,8 +3223,7 @@ hyFloat      _TheTree::ComputeTreeBlockByBranch  (                   _SimpleList
             
             if (alphabetDimension == 4UL) {
                 long k3     = 0;
-                if (matchSet)
-                    
+                if (matchSet) {
                     for (long k = siteFrom; k < siteTo; k++, k3+=4) {
                         parentConditionals [k3]   = 0.;
                         parentConditionals [k3+1] = 0.;
@@ -3026,14 +3231,18 @@ hyFloat      _TheTree::ComputeTreeBlockByBranch  (                   _SimpleList
                         parentConditionals [k3+3] = 0.;
                         parentConditionals [k3+setBranchTo[siteOrdering.list_data[k]]] = localScalingFactor[k];
                     }
-                else {
-                    
-                    for (long k = siteFrom; k < siteTo; k++, k3+=4) {
+                } else {
+                     for (long k = siteFrom; k < siteTo; k++, k3+=4) {
                         hyFloat scaler = localScalingFactor[k];
                         parentConditionals [k3]   = scaler;
                         parentConditionals [k3+1] = scaler;
                         parentConditionals [k3+2] = scaler;
                         parentConditionals [k3+3] = scaler;
+                         
+                        /*if (parentCode == 32194L && k == 1205L) {
+                        #pragma omp critical
+                            printf ("Site %ld, scaler %lg\n", k, scaler);
+                        }*/
                     }
                 }
             } else {
@@ -3044,8 +3253,43 @@ hyFloat      _TheTree::ComputeTreeBlockByBranch  (                   _SimpleList
                          pp[setBranchTo[siteOrdering.list_data[k]]] = localScalingFactor[k];
                     }
                 } else {
-                    for (long k = siteFrom; k < siteTo; k++, pp += alphabetDimension) {
-                        InitializeArray(pp, alphabetDimension, (hyFloat)localScalingFactor[k]);
+                    if (alphabetDimensionmod4 == 60) {
+                        for (long k = siteFrom; k < siteTo; k++, pp += alphabetDimension) {
+                            hyFloat lsf = localScalingFactor[k];
+                            pp[0] = lsf;pp[1] = lsf;pp[2] = lsf;pp[3] = lsf;
+                            pp[4] = lsf;pp[5] = lsf;pp[6] = lsf;pp[7] = lsf;
+                            pp[8] = lsf;pp[9] = lsf;pp[10] = lsf;pp[11] = lsf;
+                            pp[12] = lsf;pp[13] = lsf;pp[14] = lsf;pp[15] = lsf;
+                            pp[16] = lsf;pp[17] = lsf;pp[18] = lsf;pp[19] = lsf;
+                            pp[20] = lsf;pp[21] = lsf;pp[22] = lsf;pp[23] = lsf;
+                            pp[24] = lsf;pp[25] = lsf;pp[26] = lsf;pp[27] = lsf;
+                            pp[28] = lsf;pp[29] = lsf;pp[30] = lsf;pp[31] = lsf;
+                            pp[32] = lsf;pp[33] = lsf;pp[34] = lsf;pp[35] = lsf;
+                            pp[36] = lsf;pp[37] = lsf;pp[38] = lsf;pp[39] = lsf;
+                            pp[40] = lsf;pp[41] = lsf;pp[42] = lsf;pp[43] = lsf;
+                            pp[44] = lsf;pp[45] = lsf;pp[46] = lsf;pp[47] = lsf;
+                            pp[48] = lsf;pp[49] = lsf;pp[50] = lsf;pp[51] = lsf;
+                            pp[52] = lsf;pp[53] = lsf;pp[54] = lsf;pp[55] = lsf;
+                            pp[56] = lsf;pp[57] = lsf;pp[58] = lsf;pp[59] = lsf;
+                            for (long k2 = alphabetDimensionmod4; k2 < alphabetDimension; k2++) {
+                                pp[k2] = lsf;
+                            }
+                        }
+                    } else {
+                        if (alphabetDimension == 20UL) {
+                            for (long k = siteFrom; k < siteTo; k++, pp += alphabetDimension) {
+                                hyFloat lsf = localScalingFactor[k];
+                                pp[0] = lsf; pp[1] = lsf; pp[2] = lsf; pp[3] = lsf;
+                                pp[4] = lsf; pp[5] = lsf; pp[6] = lsf; pp[7] = lsf;
+                                pp[8] = lsf; pp[9] = lsf; pp[10] = lsf; pp[11] = lsf;
+                                pp[12] = lsf; pp[13] = lsf; pp[14] = lsf; pp[15] = lsf;
+                                pp[16] = lsf; pp[17] = lsf; pp[18] = lsf; pp[19] = lsf;
+                            }
+                        } else {
+                            for (long k = siteFrom; k < siteTo; k++, pp += alphabetDimension) {
+                                InitializeArray(pp, alphabetDimension, (hyFloat)localScalingFactor[k]);
+                            }
+                        }
                     }
                 }
             }
@@ -3093,15 +3337,15 @@ hyFloat      _TheTree::ComputeTreeBlockByBranch  (                   _SimpleList
         
         for (long siteID = siteFrom; siteID < siteTo; siteID++, parentConditionals += alphabetDimension) {
             if (tcc) {
-                if (parentTCCIBit == _HY_BITMASK_WIDTH_) {
+                if (__builtin_expect (parentTCCIBit==_HY_BITMASK_WIDTH_,0)) {
                     parentTCCIBit   = 0;
                     parentTCCIIndex ++;
                 }
                 
-                if (siteID > siteFrom && (tcc->list_data[parentTCCIIndex] & bitMaskArray.masks[parentTCCIBit]) > 0) {
+                if (__builtin_expect(siteID > siteFrom && (tcc->list_data[parentTCCIIndex] & bitMaskArray.masks[parentTCCIBit]) > 0,0)) {
                     if (!isLeaf) {
                         childVector     += alphabetDimension;
-                        if (++currentTCCBit == _HY_BITMASK_WIDTH_) {
+                        if (__builtin_expect(++currentTCCBit == _HY_BITMASK_WIDTH_,0)) {
                             currentTCCBit   = 0;
                             currentTCCIndex ++;
                         }
@@ -3119,7 +3363,7 @@ hyFloat      _TheTree::ComputeTreeBlockByBranch  (                   _SimpleList
             hyFloat  const *tMatrix = transitionMatrix;
             hyFloat  sum         = 0.0;
             
-            char        didScale = 0;
+            long        didScale = 0;
             
             if (isLeaf) {
                 long siteState;
@@ -3129,7 +3373,7 @@ hyFloat      _TheTree::ComputeTreeBlockByBranch  (                   _SimpleList
                 } else {
                     siteState = lNodeFlags[nodeCode*siteCount + siteOrdering.list_data[siteID]] ;
                 }
-                if (siteState >= 0L)
+                if (__builtin_expect(siteState >= 0L,1))
                     // a single character state; sweep down the appropriate column
                 {
                     if (alphabetDimension == 4UL) {
@@ -3141,6 +3385,8 @@ hyFloat      _TheTree::ComputeTreeBlockByBranch  (                   _SimpleList
                         unsigned long k = 0UL;
                         unsigned long target_index = siteState;
                         unsigned long shifter = alphabetDimension << 2;
+                        
+                        
                         for (; k < alphabetDimensionmod4; k+=4UL, target_index += shifter) {
                             parentConditionals[k]    *= tMatrix[target_index];
                             parentConditionals[k+1L] *= tMatrix[target_index + alphabetDimension];
@@ -3157,17 +3403,24 @@ hyFloat      _TheTree::ComputeTreeBlockByBranch  (                   _SimpleList
                 }
             } else {
                 if (tcc) {
-                    if ((tcc->list_data[currentTCCIndex] & bitMaskArray.masks[currentTCCBit]) > 0 && siteID > siteFrom) {
-                        for (long k = 0; k < alphabetDimension; k++) {
+                    if (__builtin_expect((tcc->list_data[currentTCCIndex] & bitMaskArray.masks[currentTCCBit]) > 0 && siteID > siteFrom,0)) {
+                        memcpy (childVector,lastUpdatedSite,alphabetDimension*(sizeof (hyFloat)));
+                        /*for (long k = 0; k < alphabetDimension; k++) {
                             childVector[k] = lastUpdatedSite[k];
-                        }
+                        }*/
                     }
-                    if (++currentTCCBit == _HY_BITMASK_WIDTH_) {
+                    if (__builtin_expect(++currentTCCBit == _HY_BITMASK_WIDTH_,0)) {
                         currentTCCBit   = 0;
                         currentTCCIndex ++;
                     }
                     lastUpdatedSite = childVector;
                 }
+                /*if (likeFuncEvalCallCount == 11035 && siteOrdering.list_data[siteID] == 1141) {
+                    
+                    fprintf (stderr, "REGULAR,%s,%15.12g,%15.12g,%15.12g,%15.12g,%15.12g\n", currentTreeNode->GetName()->get_str(),
+                            scalingAdjustments[nodeCode*siteCount+siteID],
+                            childVector[0],childVector[1],childVector[2],childVector[3]);
+                }*/
             }
 /*
  #ifdef _SLKP_USE_AVX_INTRINSICS
@@ -3196,6 +3449,8 @@ hyFloat      _TheTree::ComputeTreeBlockByBranch  (                   _SimpleList
 
             if (alphabetDimension == 4L) { // special case for nuc data
                 
+                //hyFloat stash [4] = {parentConditionals[0], parentConditionals[1], parentConditionals[2], parentConditionals[3]};
+                
 #ifdef _SLKP_USE_AVX_INTRINSICS
                 _handle4x4_pruning_case (childVector, tMatrix, parentConditionals, tmatrix_transpose);
 #else
@@ -3206,28 +3461,42 @@ hyFloat      _TheTree::ComputeTreeBlockByBranch  (                   _SimpleList
                 // for example if a change must happen on a zero-branch length
                 
                 sum     = (parentConditionals [0] + parentConditionals [1]) + (parentConditionals [2] + parentConditionals [3]);
-                if (sum < _lfScalingFactorThreshold && sum > 0.0) {
-                    hyFloat tryScale                                 = scalingAdjustments [parentCode*siteCount + siteID] * _lfScalerUpwards;
-                    if (tryScale < HUGE_VAL) {
-                        parentConditionals [0]                             *= _lfScalerUpwards;
-                        parentConditionals [1]                             *= _lfScalerUpwards;
-                        parentConditionals [2]                             *= _lfScalerUpwards;
-                        parentConditionals [3]                             *= _lfScalerUpwards;
-                        localScalerChange                                  += theFilter->theFrequencies.get (siteOrdering.list_data[siteID]);
-                        scalingAdjustments [parentCode*siteCount + siteID]  = tryScale;
-                        didScale                                            = 1;
+                
+                /*if (likeFuncEvalCallCount == 11035) {
+                    if ((siteID == 677 || siteID == 692 || siteID == 774) && currentTreeNode->GetName()->EndsWith("NODE_00027110_64")) {
+                        printf ("[CHECK BEFORE] IN REGULAR COMPUTE %ld %ld (%s/%lg [index = %ld, %ld, %ld, %ld], sum = %lg)\n", likeFuncEvalCallCount, siteID, currentTreeNode->GetName()->get_str(), scalingAdjustments [parentCode*siteCount + siteID], nodeCode, parentCode, siteCount, siteID, sum);
                     }
+                }*/
+                
+               if (__builtin_expect(sum < _lfScalingFactorThreshold && sum > 0.0,0)) {
+
+                    hyFloat scaler = _computeBoostScaler(scalingAdjustments [parentCode*siteCount + siteID] * _lfScalerUpwards, sum, didScale);
+                    
+                    if (didScale) {
+                        parentConditionals [0]                             *= scaler;
+                        parentConditionals [1]                             *= scaler;
+                        parentConditionals [2]                             *= scaler;
+                        parentConditionals [3]                             *= scaler;
+                        localScalerChange                                  += didScale * theFilter->theFrequencies.get (siteOrdering.list_data[siteID]);
+                        scalingAdjustments [parentCode*siteCount + siteID] *= scaler;
+                    }
+                    
                 } else {
-                    if (sum > _lfScalerUpwards) {
-                        scalingAdjustments [parentCode*siteCount + siteID] *= _lfScalingFactorThreshold;
-                        parentConditionals [0]                             *= _lfScalingFactorThreshold;
-                        parentConditionals [1]                             *= _lfScalingFactorThreshold;
-                        parentConditionals [2]                             *= _lfScalingFactorThreshold;
-                        parentConditionals [3]                             *= _lfScalingFactorThreshold;
-                        localScalerChange                                  -= theFilter->theFrequencies.get (siteOrdering.list_data[siteID]);
-                        didScale                                            = -1;
+                    if (__builtin_expect(sum > _lfScalerUpwards && sum < HUGE_VAL,0)) {
+                        
+                        hyFloat scaler = _computeReductionScaler (scalingAdjustments [parentCode*siteCount + siteID] * _lfScalingFactorThreshold, sum, didScale);
+                        
+                        if (didScale) {
+                            parentConditionals [0]                             *= scaler;
+                            parentConditionals [1]                             *= scaler;
+                            parentConditionals [2]                             *= scaler;
+                            parentConditionals [3]                             *= scaler;
+                            localScalerChange                                  += didScale * theFilter->theFrequencies (siteOrdering.list_data[siteID]);
+                            scalingAdjustments [parentCode*siteCount + siteID] *= scaler;
+                        }
                     }
                 }
+                
                 
                 childVector += 4;
             } else {
@@ -3284,49 +3553,78 @@ hyFloat      _TheTree::ComputeTreeBlockByBranch  (                   _SimpleList
                         
 #elif defined _SLKP_USE_AVX_INTRINSICS // end _SLKP_USE_SSE_INTRINSICS
                         if (alphabetDimensionmod4 == 60) {
-                            __m256d matrix_quad1 = _mm256_mul_pd(_mm256_loadu_pd (tMatrix),_mm256_loadu_pd (childVector));
-                            __m256d matrix_quad2 = _mm256_mul_pd(_mm256_loadu_pd (tMatrix+4),_mm256_loadu_pd (childVector+4));
-                            __m256d matrix_quad3 = _mm256_mul_pd(_mm256_loadu_pd (tMatrix+8),_mm256_loadu_pd (childVector+8));
-                            __m256d matrix_quad4 = _mm256_mul_pd(_mm256_loadu_pd (tMatrix+12),_mm256_loadu_pd (childVector+12));
-                            __m256d matrix_quad5 = _mm256_mul_pd(_mm256_loadu_pd (tMatrix+16),_mm256_loadu_pd (childVector+16));
-                            __m256d matrix_quad6 = _mm256_mul_pd(_mm256_loadu_pd (tMatrix+20),_mm256_loadu_pd (childVector+20));
-                            __m256d matrix_quad7 = _mm256_mul_pd(_mm256_loadu_pd (tMatrix+24),_mm256_loadu_pd (childVector+24));
-                            __m256d matrix_quad8 = _mm256_mul_pd(_mm256_loadu_pd (tMatrix+28),_mm256_loadu_pd (childVector+28));
-                            __m256d matrix_quad9 = _mm256_mul_pd(_mm256_loadu_pd (tMatrix+32),_mm256_loadu_pd (childVector+32));
-                            __m256d matrix_quad10 = _mm256_mul_pd(_mm256_loadu_pd (tMatrix+36),_mm256_loadu_pd (childVector+36));
-                            __m256d matrix_quad11 = _mm256_mul_pd(_mm256_loadu_pd (tMatrix+40),_mm256_loadu_pd (childVector+40));
-                            __m256d matrix_quad12 = _mm256_mul_pd(_mm256_loadu_pd (tMatrix+44),_mm256_loadu_pd (childVector+44));
-                            __m256d matrix_quad13 = _mm256_mul_pd(_mm256_loadu_pd (tMatrix+48),_mm256_loadu_pd (childVector+48));
-                            __m256d matrix_quad14 = _mm256_mul_pd(_mm256_loadu_pd (tMatrix+52),_mm256_loadu_pd (childVector+52));
-                            __m256d matrix_quad15 = _mm256_mul_pd(_mm256_loadu_pd (tMatrix+56),_mm256_loadu_pd (childVector+56));
+                            
+ 
+                            #ifdef _SLKP_USE_FMA3_INTRINSICS
+                                __m256d matrix_quad2 = _mm256_mul_pd(_mm256_loadu_pd (tMatrix),_mm256_loadu_pd (childVector));
+                                matrix_quad2 = _mm256_fmadd_pd (_mm256_loadu_pd (tMatrix+4),_mm256_loadu_pd (childVector+4),matrix_quad2);
+                                
+                                __m256d matrix_quad4 = _mm256_mul_pd(_mm256_loadu_pd (tMatrix+8),_mm256_loadu_pd (childVector+8));
+                                matrix_quad4 = _mm256_fmadd_pd (_mm256_loadu_pd (tMatrix+12),_mm256_loadu_pd (childVector+12),matrix_quad4);
 
-                            matrix_quad1 = _mm256_add_pd (matrix_quad1,matrix_quad2);
-                            matrix_quad3 = _mm256_add_pd (matrix_quad3,matrix_quad4);
-                            matrix_quad5 = _mm256_add_pd (matrix_quad5,matrix_quad6);
-                            matrix_quad7 = _mm256_add_pd (matrix_quad7,matrix_quad8);
-                            matrix_quad9 = _mm256_add_pd (matrix_quad9,matrix_quad10);
-                            matrix_quad11 = _mm256_add_pd (matrix_quad11,matrix_quad12);
-                            matrix_quad13 = _mm256_add_pd (matrix_quad13,matrix_quad14);
+                                __m256d matrix_quad6 = _mm256_mul_pd(_mm256_loadu_pd (tMatrix+16),_mm256_loadu_pd (childVector+16));
+                                matrix_quad6 = _mm256_fmadd_pd (_mm256_loadu_pd (tMatrix+20),_mm256_loadu_pd (childVector+20),matrix_quad6);
 
-                            matrix_quad2 = _mm256_add_pd (matrix_quad1,matrix_quad3);
-                            matrix_quad4 = _mm256_add_pd (matrix_quad5,matrix_quad7);
-                            matrix_quad6 = _mm256_add_pd (matrix_quad9,matrix_quad11);
-                            matrix_quad8 = _mm256_add_pd (matrix_quad13,matrix_quad15);
+                                __m256d matrix_quad8 = _mm256_mul_pd(_mm256_loadu_pd (tMatrix+24),_mm256_loadu_pd (childVector+24));
+                                matrix_quad8 = _mm256_fmadd_pd (_mm256_loadu_pd (tMatrix+28),_mm256_loadu_pd (childVector+28),matrix_quad8);
 
-                            accumulator = _avx_sum_4(_mm256_add_pd (_mm256_add_pd(matrix_quad2,matrix_quad4), _mm256_add_pd(matrix_quad6,matrix_quad8)));
+                                matrix_quad2 = _mm256_fmadd_pd (_mm256_loadu_pd (tMatrix+32),_mm256_loadu_pd (childVector+32),matrix_quad2);
+                                matrix_quad4 = _mm256_fmadd_pd (_mm256_loadu_pd (tMatrix+36),_mm256_loadu_pd (childVector+36),matrix_quad4);
+                                matrix_quad6 = _mm256_fmadd_pd (_mm256_loadu_pd (tMatrix+40),_mm256_loadu_pd (childVector+40),matrix_quad6);
+                                matrix_quad8 = _mm256_fmadd_pd (_mm256_loadu_pd (tMatrix+44),_mm256_loadu_pd (childVector+44),matrix_quad8);
+
+                                matrix_quad2 = _mm256_fmadd_pd (_mm256_loadu_pd (tMatrix+48),_mm256_loadu_pd (childVector+48),matrix_quad2);
+                                matrix_quad4 = _mm256_fmadd_pd (_mm256_loadu_pd (tMatrix+52),_mm256_loadu_pd (childVector+52),matrix_quad4);
+                                matrix_quad6 = _mm256_fmadd_pd (_mm256_loadu_pd (tMatrix+56),_mm256_loadu_pd (childVector+56),matrix_quad6);
+                                
+                            
+                            #else
+                                __m256d matrix_quad1 = _mm256_mul_pd(_mm256_loadu_pd (tMatrix),_mm256_loadu_pd (childVector));
+                                __m256d matrix_quad2 = _mm256_mul_pd(_mm256_loadu_pd (tMatrix+4),_mm256_loadu_pd (childVector+4));
+                                matrix_quad1 = _mm256_add_pd (matrix_quad1,matrix_quad2);
+                                __m256d matrix_quad3 = _mm256_mul_pd(_mm256_loadu_pd (tMatrix+8),_mm256_loadu_pd (childVector+8));
+                                __m256d matrix_quad4 = _mm256_mul_pd(_mm256_loadu_pd (tMatrix+12),_mm256_loadu_pd (childVector+12));
+                                matrix_quad3 = _mm256_add_pd (matrix_quad3,matrix_quad4);
+                                __m256d matrix_quad5 = _mm256_mul_pd(_mm256_loadu_pd (tMatrix+16),_mm256_loadu_pd (childVector+16));
+                                __m256d matrix_quad6 = _mm256_mul_pd(_mm256_loadu_pd (tMatrix+20),_mm256_loadu_pd (childVector+20));
+                                matrix_quad5 = _mm256_add_pd (matrix_quad5,matrix_quad6);
+                                __m256d matrix_quad7 = _mm256_mul_pd(_mm256_loadu_pd (tMatrix+24),_mm256_loadu_pd (childVector+24));
+                                __m256d matrix_quad8 = _mm256_mul_pd(_mm256_loadu_pd (tMatrix+28),_mm256_loadu_pd (childVector+28));
+                                matrix_quad7 = _mm256_add_pd (matrix_quad7,matrix_quad8);
+                                __m256d matrix_quad9 = _mm256_mul_pd(_mm256_loadu_pd (tMatrix+32),_mm256_loadu_pd (childVector+32));
+                                __m256d matrix_quad10 = _mm256_mul_pd(_mm256_loadu_pd (tMatrix+36),_mm256_loadu_pd (childVector+36));
+                                matrix_quad9 = _mm256_add_pd (matrix_quad9,matrix_quad10);
+                                __m256d matrix_quad11 = _mm256_mul_pd(_mm256_loadu_pd (tMatrix+40),_mm256_loadu_pd (childVector+40));
+                                __m256d matrix_quad12 = _mm256_mul_pd(_mm256_loadu_pd (tMatrix+44),_mm256_loadu_pd (childVector+44));
+                                matrix_quad11 = _mm256_add_pd (matrix_quad11,matrix_quad12);
+                                __m256d matrix_quad13 = _mm256_mul_pd(_mm256_loadu_pd (tMatrix+48),_mm256_loadu_pd (childVector+48));
+                                __m256d matrix_quad14 = _mm256_mul_pd(_mm256_loadu_pd (tMatrix+52),_mm256_loadu_pd (childVector+52));
+                                matrix_quad13 = _mm256_add_pd (matrix_quad13,matrix_quad14);
+                                __m256d matrix_quad15 = _mm256_mul_pd(_mm256_loadu_pd (tMatrix+56),_mm256_loadu_pd (childVector+56));
+
+
+                                matrix_quad2 = _mm256_add_pd (matrix_quad1,matrix_quad3);
+                                matrix_quad4 = _mm256_add_pd (matrix_quad5,matrix_quad7);
+                                matrix_quad6 = _mm256_add_pd (matrix_quad9,matrix_quad11);
+                                matrix_quad8 = _mm256_add_pd (matrix_quad13,matrix_quad15);
+
+                            #endif
+                                
+                                accumulator = _avx_sum_4(_mm256_add_pd (_mm256_add_pd(matrix_quad2,matrix_quad4), _mm256_add_pd(matrix_quad6,matrix_quad8)));
+                            
  
                         } else {
                         
                         __m256d sum256 = _mm256_setzero_pd();
                             for (long c = 0L; c < alphabetDimensionmod4; c+=4L) {
                                 __m256d matrix_quad = _mm256_loadu_pd (tMatrix+c),
-                                child_quad = _mm256_loadu_pd (childVector+c);
-    #ifdef _SLKP_USE_FMA3_INTRINSICS
-                                sum256 = _mm256_fmadd_pd (matrix_quad,child_quad, sum256);
-    #else
-                                __m256d prod = _mm256_mul_pd (matrix_quad, child_quad);
-                                sum256 = _mm256_add_pd (sum256,prod);
-    #endif
+                                         child_quad = _mm256_loadu_pd (childVector+c);
+                                #ifdef _SLKP_USE_FMA3_INTRINSICS
+                                    sum256 = _mm256_fmadd_pd (matrix_quad,child_quad, sum256);
+                                #else
+                                    __m256d prod = _mm256_mul_pd (matrix_quad, child_quad);
+                                    sum256 = _mm256_add_pd (sum256,prod);
+                                #endif
             
                            }
                            accumulator = _avx_sum_4(sum256);
@@ -3348,7 +3646,7 @@ hyFloat      _TheTree::ComputeTreeBlockByBranch  (                   _SimpleList
 #endif // regular code
                         
                         if (alphabetDimension == 61) {
-                            sum += (parentConditionals[p] *= accumulator + tMatrix[alphabetDimensionmod4] * childVector[alphabetDimensionmod4]);
+                            sum += (parentConditionals[p] *= accumulator + tMatrix[60] * childVector[60]);
                         } else {
                             for (long c = alphabetDimensionmod4; c < alphabetDimension; c++) {
                                 accumulator +=  tMatrix[c] * childVector[c];
@@ -3414,31 +3712,49 @@ hyFloat      _TheTree::ComputeTreeBlockByBranch  (                   _SimpleList
                 
                 
                 
-                if (sum < _lfScalingFactorThreshold && sum > 0.0) {
-                    hyFloat tryScale                                 = scalingAdjustments [parentCode*siteCount + siteID] * _lfScalerUpwards;
-                    if (tryScale < HUGE_VAL) {
-                        scalingAdjustments [parentCode*siteCount + siteID] = tryScale;
+                if (__builtin_expect(sum < _lfScalingFactorThreshold && sum > 0.0,0)) {
+                    
+                    hyFloat scaler = _computeBoostScaler(scalingAdjustments [parentCode*siteCount + siteID] * _lfScalerUpwards, sum, didScale);
+                    
+                    if (didScale) {
                         for (long c = 0; c < alphabetDimension; c++) {
-                            parentConditionals [c] *= _lfScalerUpwards;
+                            parentConditionals [c] *= scaler;
                         }
                         
-                        localScalerChange                                      += theFilter->theFrequencies.get(siteOrdering.list_data[siteID]);
-                        didScale                                                = 1;
+                        localScalerChange                                  += didScale * theFilter->theFrequencies.get (siteOrdering.list_data[siteID]);
+                        scalingAdjustments [parentCode*siteCount + siteID]  *= scaler;
                     }
+                    
                 } else {
-                    if (sum > _lfScalerUpwards) {
-                        scalingAdjustments [parentCode*siteCount + siteID] *= _lfScalingFactorThreshold;
-                        for (long c = 0; c < alphabetDimension; c++) {
-                            parentConditionals [c] *= _lfScalingFactorThreshold;
+                    if (__builtin_expect(sum > _lfScalerUpwards,0)) {
+                        if (sum < HUGE_VAL) { // no point scaling an infinity
+                            
+                            hyFloat scaler = _computeReductionScaler (scalingAdjustments [parentCode*siteCount + siteID] * _lfScalingFactorThreshold, sum, didScale);
+                            
+                            if (didScale) {
+                                for (long c = 0; c < alphabetDimension; c++) {
+                                     parentConditionals [c] *= scaler;
+                                 }
+                               
+                                localScalerChange                                  += didScale * theFilter->theFrequencies (siteOrdering.list_data[siteID]);
+                                scalingAdjustments [parentCode*siteCount + siteID] *= scaler;
+                            }
+                            
+                            //#pragma omp critical
+                            //    printf ("SCALE DOWN %lg\n", scaler);
+
                         }
-                        localScalerChange                                  -= theFilter->theFrequencies.get (siteOrdering.list_data[siteID]);
-                        didScale                                            = -1;
+                        
                     }
                 }
                 childVector    += alphabetDimension;
             }
             
             if (didScale) {
+                /*if (likeFuncEvalCallCount == 11035 && siteOrdering.list_data[siteID] == 1141) {
+                    printf ("SCALED IN REGULAR COMPUTE %ld %ld %ld (%s/%lg)\n", likeFuncEvalCallCount, siteID, didScale, currentTreeNode->GetName()->get_str(), scalingAdjustments [parentCode*siteCount + siteID] );
+                }*/
+                
                 if (siteCorrectionCounts) {
                     siteCorrectionCounts [siteOrdering.list_data[siteID]] += didScale;
                 }
@@ -3453,8 +3769,18 @@ hyFloat      _TheTree::ComputeTreeBlockByBranch  (                   _SimpleList
                     hyFloat              scM;
                     if (didScale < 0) {
                         scM = _lfScalingFactorThreshold;
+                        if (didScale < -1) {
+                            for (long k = 0; k < -didScale-1; k++) {
+                                scM *= _lfScalingFactorThreshold;
+                            }
+                        }
                     } else {
                         scM = _lfScalerUpwards;
+                        if (didScale > 1) {
+                            for (long k = 1; k < didScale; k++) {
+                                scM *= _lfScalerUpwards;
+                            }
+                        }
                     }
                     
                     
@@ -3493,20 +3819,23 @@ hyFloat      _TheTree::ComputeTreeBlockByBranch  (                   _SimpleList
             long                rootState = setBranchTo[siteOrdering.list_data[siteID]];
             accumulator         = rootConditionals[rootIndex + rootState] * theProbs[rootState];
             rootIndex           += alphabetDimension;
-        } else
+        } else {
+            
             for (long p = 0; p < alphabetDimension; p++,rootIndex++) {
                 accumulator += rootConditionals[rootIndex] * theProbs[p];
+                
             }
+        }
+           
+        /*#pragma omp critical
+        if (siteID == 1205) {
+            printf ("\n ACCUMULATOR = %lg (%ld)\n", accumulator, likeFuncEvalCallCount);
+        }*/
                 
         /*#pragma omp critical
          {
-         if (likeFuncEvalCallCount == 0) {
-         eval_buffer [siteID] = accumulator;
-         } else {
-         if (!CheckEqual (eval_buffer [siteID], accumulator)) {
-         printf ("EVAL %ld, Site %ld/%ld, LogL %g, %g (%d)\n", likeFuncEvalCallCount, siteFrom, siteID, accumulator, eval_buffer [siteID],localScalerChange);
-         }
-         eval_buffer [siteID] = accumulator;
+         if (true || likeFuncEvalCallCount == 8) {
+             printf ("EVAL %ld, Site %ld/%ld, %g (freq = %d, log L = %g), (%g) is le0 = %d\n", likeFuncEvalCallCount, siteID, siteTo, accumulator , theFilter->theFrequencies (siteOrdering.list_data[siteID]), log (accumulator), correction, accumulator <= 0.0);
          }
          }*/
         
@@ -3517,6 +3846,7 @@ hyFloat      _TheTree::ComputeTreeBlockByBranch  (                   _SimpleList
                 result = -INFINITY;
 #pragma omp critical
                 {
+                    //printf ("BAILING WITH INFINITY %ld\n", siteID);
                     hy_global::ReportWarning (_String("Site ") & (1L+siteOrdering.list_data[siteID]) & " evaluated to a 0 probability in ComputeTreeBlockByBranch");
                 }
                 break;
@@ -3525,12 +3855,19 @@ hyFloat      _TheTree::ComputeTreeBlockByBranch  (                   _SimpleList
             hyFloat term;
             long   const    site_frequency = theFilter->theFrequencies (siteOrdering.list_data[siteID]);
             
+            
+            
             if (site_frequency > 1L) {
                 term = log(accumulator) * site_frequency - correction;
             } else {
                 term = log(accumulator) - correction;
             }
             // Kahan sum
+            
+            /*if (likeFuncEvalCallCount == 11035) {
+               fprintf (stderr, "REGULAR, %ld, %ld, %20.15lg, %20.15lg, %20.15lg\n", likeFuncEvalCallCount, siteID, accumulator, correction, term);
+            }*/
+                        
             hyFloat temp_sum = result + term;
             correction = (temp_sum - result) - term;
             result = temp_sum;
@@ -3579,10 +3916,15 @@ void            _TheTree::ComputeBranchCache    (
      */
     //printf ("ComputeBranchCache\n");
     
-    _SimpleList taggedNodes (flatLeaves.lLength + flatNodes.lLength, 0, 0),
+    long *tagged_node_cache = (long*)alloca ((flatLeaves.lLength + flatNodes.lLength)*sizeof (long));
+    
+    _SimpleList taggedNodes (flatLeaves.lLength + flatNodes.lLength, tagged_node_cache),
                 nodesToProcess,
                 rootPath;
     
+    taggedNodes.Populate (flatLeaves.lLength + flatNodes.lLength, 0, 0);
+    
+     
     long        myParent               = brID       -flatLeaves.lLength;
     
     const long  alphabetDimension     =            theFilter->GetDimension(),
@@ -3611,13 +3953,17 @@ void            _TheTree::ComputeBranchCache    (
         }
     }
     
-    /*printf ("\n\nComputeBranchCache at branch %ld; siteOdering %s\n",
-     brID, _String((_String*)siteOrdering.toStr()).sData);
+    /*
+     if (likeFuncEvalCallCount == 11035) {
+     printf ("\n\nComputeBranchCache at branch %ld; siteOdering %s\n",
+     brID, _String((_String*)siteOrdering.toStr()).get_str());
      
-     echoNodeList (rootPath,flatLeaves,flatNodes );
+     echoNodeList (rootPath,flatLeaves,flatNodes,flatParents);
      printf ("\n");
-     echoNodeList (nodesToProcess,flatLeaves,flatNodes);
-     */
+     echoNodeList (nodesToProcess,flatLeaves,flatNodes,flatParents);
+    }
+    */
+     
     
     hyFloat * state = cache + alphabetDimension * siteFrom,
     * childVector;
@@ -3635,13 +3981,20 @@ void            _TheTree::ComputeBranchCache    (
                     state[s] = 0.;
                 }
                 state[siteState] = 1.;
+                /*if (likeFuncEvalCallCount == 11035 && siteOrdering.list_data[siteID] == 1141) {
+                    printf ("RESOLVED SITE STATE: %15.12g, %15.12g, %15.12g, %15.12g\n", state[0],state[1],state[2],state[3]);
+                }*/
             } else {
                 childVector = lNodeResolutions->theData + (-siteState-1) * alphabetDimension;
                 for (unsigned long s = 0UL; s < alphabetDimension; s++) {
                     state[s] = childVector[s];
                 }
+                /*if (likeFuncEvalCallCount == 11035 && siteOrdering.list_data[siteID] == 1141) {
+                    printf ("AMBIGUOUS SITE STATE (%ld): %15.12g, %15.12g, %15.12g, %15.12g\n", siteState, state[0],state[1],state[2],state[3]);
+                }*/
             }
         }
+        
     } else { // an internal branch
         long        nodeCode = brID - flatLeaves.lLength;
         hyFloat *lastUpdated = iNodeCache + (nodeCode * siteCount + siteFrom) * alphabetDimension;
@@ -3685,9 +4038,15 @@ void            _TheTree::ComputeBranchCache    (
     for  (long nodeID = 0; nodeID < node_count; nodeID++) {
         bool    notPassedRoot = nodeID<nodesToProcess.lLength;
         
-        long    nodeCode   = notPassedRoot?nodesToProcess.list_data [nodeID]:rootPath.list_data[nodeID-nodesToProcess.lLength],
-        parentCode = notPassedRoot?flatParents.list_data [nodeCode]:(rootPath.list_data[nodeID-nodesToProcess.lLength+1] - flatLeaves.lLength);
+        long nodeCode, parentCode;
         
+        if (notPassedRoot) {
+            nodeCode = nodesToProcess.list_data [nodeID];
+            parentCode = flatParents.list_data [nodeCode];
+        } else {
+            nodeCode = rootPath.list_data[nodeID-nodesToProcess.lLength];
+            parentCode = (rootPath.list_data[nodeID-nodesToProcess.lLength+1] - flatLeaves.lLength);
+        }
         
         bool    isLeaf     = nodeCode < flatLeaves.lLength;
         
@@ -3765,7 +4124,8 @@ void            _TheTree::ComputeBranchCache    (
         for (long siteID = siteFrom; siteID < siteTo; siteID++, parentConditionals += alphabetDimension) {
             hyFloat  const *tMatrix = transitionMatrix;
             
-            char canScale = !notPassedRoot;
+            bool canScale = !notPassedRoot;
+                // only scale "the inverted path", but don't store the scaling changes
             
             if (isLeaf) {
                 long siteState = lNodeFlags[nodeCode*siteCount + siteOrdering.list_data[siteID]] ;
@@ -3794,7 +4154,7 @@ void            _TheTree::ComputeBranchCache    (
                 } else {
                     childVector = lNodeResolutions->theData + (-siteState-1) * alphabetDimension;
                 }
-                canScale = 0;
+                canScale = false;
             } else {
                 if (tcc&&notPassedRoot) {
                     if ((tcc->list_data[currentTCCIndex] & bitMaskArray.masks[currentTCCBit]) > 0 && siteID > siteFrom)
@@ -3818,39 +4178,69 @@ void            _TheTree::ComputeBranchCache    (
                 }
             }
             
+            /*if (likeFuncEvalCallCount == 11035 && siteOrdering.list_data[siteID] == 1141) {
+                if (!isLeaf && notPassedRoot) {
+                    fprintf (stderr, "CACHE,%s,%15.12g,%15.12g,%15.12g,%15.12g,%15.12g\n", currentTreeNode->GetName()->get_str(),
+                               scalingAdjustments[nodeCode*siteCount+siteID],
+                               childVector[0],childVector[1],childVector[2],childVector[3]);
+                }
+            }*/
+            
             hyFloat sum      = .0;
-            char       didScale = 0;
+            long       didScale = 0;
             
             if (alphabetDimension == 4UL) { // special case for nuc data
+                /*if (likeFuncEvalCallCount == 11035 && siteOrdering.list_data[siteID] == 1141) {
+                    printf ("\n\n%s\n",currentTreeNode->GetName()->get_str());
+                    printf ("parentConditionals = %15.12g %15.12g %15.12g %15.12g\n", parentConditionals[0],parentConditionals[1],parentConditionals[2],parentConditionals[3]);
+                    printf ("childVector = %15.12g %15.12g %15.12g %15.12g\n", childVector[0],childVector[1],childVector[2],childVector[3]);
+                    printf ("tmatrix[0] = %15.12g %15.12g %15.12g %15.12g\n", tMatrix[0],tMatrix[1],tMatrix[2],tMatrix[3]);
+                    printf ("tmatrix[1] = %15.12g %15.12g %15.12g %15.12g\n", tMatrix[4],tMatrix[5],tMatrix[6],tMatrix[7]);
+                    printf ("tmatrix[2] = %15.12g %15.12g %15.12g %15.12g\n", tMatrix[8],tMatrix[9],tMatrix[10],tMatrix[11]);
+                    printf ("tmatrix[3] = %15.12g %15.12g %15.12g %15.12g\n", tMatrix[12],tMatrix[13],tMatrix[14],tMatrix[15]);
+
+                }*/
+                
+                
 #ifdef _SLKP_USE_AVX_INTRINSICS
                 _handle4x4_pruning_case (childVector, tMatrix, parentConditionals, tmatrix_transpose);
 #else
                 _handle4x4_pruning_case (childVector, tMatrix, parentConditionals, nil);
 #endif
                 
+                 /*if (likeFuncEvalCallCount == 11035 && siteOrdering.list_data[siteID] == 1141) {
+                      printf ("parentConditionals[post child mixin] = %15.12g %15.12g %15.12g %15.12g [can scale = %d]\n", parentConditionals[0],parentConditionals[1],parentConditionals[2],parentConditionals[3],canScale);
+                 }*/
+                     
                 if (canScale) {
                     sum     = (parentConditionals [0] + parentConditionals [1]) + (parentConditionals [2] + parentConditionals [3]);
-                    if (sum < _lfScalingFactorThreshold && sum > 0.0) {
-                        hyFloat tryScale                                 = scalingAdjustments [nodeCode*siteCount + siteID] * _lfScalerUpwards;
-                        if (tryScale < HUGE_VAL) {
-                            parentConditionals[0]                             *= _lfScalerUpwards;
-                            parentConditionals[1]                             *= _lfScalerUpwards;
-                            parentConditionals[2]                             *= _lfScalerUpwards;
-                            parentConditionals[3]                             *= _lfScalerUpwards;
-                            
-                            localScalerChange                                  += theFilter->theFrequencies (siteOrdering.list_data[siteID]);
-                            didScale                                            = 1;
+                    
+                    if (__builtin_expect(sum < _lfScalingFactorThreshold && sum > 0.0,0)) {
+                        hyFloat scaler = _computeBoostScaler(scalingAdjustments [nodeCode*siteCount + siteID] * _lfScalerUpwards, sum, didScale);
+                        if (didScale) {
+                            parentConditionals [0]                             *= scaler;
+                            parentConditionals [1]                             *= scaler;
+                            parentConditionals [2]                             *= scaler;
+                            parentConditionals [3]                             *= scaler;
+                            localScalerChange                                  += didScale * theFilter->theFrequencies.get (siteOrdering.list_data[siteID]);
                         }
+                        
                     } else {
-                        if (sum > _lfScalerUpwards) {
-                            parentConditionals [0]                             *= _lfScalingFactorThreshold;
-                            parentConditionals [1]                             *= _lfScalingFactorThreshold;
-                            parentConditionals [2]                             *= _lfScalingFactorThreshold;
-                            parentConditionals [3]                             *= _lfScalingFactorThreshold;
+                        if (__builtin_expect(sum > _lfScalerUpwards,0)) {
+                            if (sum < HUGE_VAL) { // no point scaling an infinity
+                                
+                                hyFloat scaler = _computeReductionScaler (scalingAdjustments [nodeCode*siteCount + siteID] * _lfScalingFactorThreshold, sum, didScale);
+                                 
+                                if (didScale) {
+                                    parentConditionals [0]                             *= scaler;
+                                    parentConditionals [1]                             *= scaler;
+                                    parentConditionals [2]                             *= scaler;
+                                    parentConditionals [3]                             *= scaler;
+                                    localScalerChange                                  += didScale * theFilter->theFrequencies (siteOrdering.list_data[siteID]);
+                               }
                             
-                            localScalerChange                                  -= theFilter->theFrequencies (siteOrdering.list_data[siteID]);
-                            didScale                                            = -1;
-                        }
+                          }
+                       }
                     }
                 }
                 childVector += 4L;
@@ -3928,34 +4318,55 @@ void            _TheTree::ComputeBranchCache    (
                 childVector    += alphabetDimension;
                 
                 if (canScale) {
-                    if (sum < _lfScalingFactorThreshold && sum > 0.0) {
-                        hyFloat tryScale                                 = scalingAdjustments [nodeCode*siteCount + siteID] * _lfScalerUpwards;
-                        if (tryScale < HUGE_VAL) {
-                            //printf ("tryScale < HUGE_VAL\n");
+                    if (__builtin_expect(sum < _lfScalingFactorThreshold && sum > 0.0,0)) {
+                        hyFloat scaler = _computeBoostScaler(scalingAdjustments [nodeCode*siteCount + siteID] * _lfScalerUpwards, sum, didScale);
+                        
+                        if (didScale) {
                             for (unsigned long c = 0UL; c < alphabetDimension; c++) {
-                                parentConditionals [c] *= _lfScalerUpwards;
+                                parentConditionals [c] *= scaler;
                             }
-                            
-                            localScalerChange                                      += theFilter->theFrequencies.get (siteOrdering.list_data[siteID]);
-                            didScale                                                = 1;
+                            localScalerChange   += didScale * theFilter->theFrequencies.get (siteOrdering.list_data[siteID]);
                         }
-                    } else {
-                        if (sum > _lfScalerUpwards) {
-                            //printf ("sum > _lfScalerUpwards\n");
-                            for (unsigned long c = 0UL; c < alphabetDimension; c++) {
-                                parentConditionals [c] *= _lfScalingFactorThreshold;
-                            }
+                        
+                      } else {
+                        if (__builtin_expect(sum > _lfScalerUpwards && sum < HUGE_VAL,0)) {
+                            hyFloat scaler = _computeReductionScaler (scalingAdjustments [nodeCode*siteCount + siteID] * _lfScalingFactorThreshold, sum, didScale);
                             
-                            localScalerChange                                  -= theFilter->theFrequencies.get (siteOrdering.list_data[siteID]);
-                            didScale                                            = -1;
+                            if (didScale) {
+                                for (unsigned long c = 0UL; c < alphabetDimension; c++) {
+                                     parentConditionals [c] *= scaler;
+                                }
+                                localScalerChange  += didScale * theFilter->theFrequencies (siteOrdering.list_data[siteID]);
+                            }
                         }
                     }
                 }
             }
             
+            /*if (didScale && likeFuncEvalCallCount == 11035) {
+                printf ("SCALED IN BRANCH CACHE COMPUTE %ld %ld %ld (%s/%lg)\n", likeFuncEvalCallCount, siteID, didScale, currentTreeNode->GetName()->get_str(), scalingAdjustments [parentCode*siteCount + siteID] );
+            }*/
+            
             if (didScale&&siteCorrectionCounts) {
+                //
                 siteCorrectionCounts [siteOrdering.list_data[siteID]] += didScale;
-                siteRes[siteOrdering.list_data[siteID]] *= didScale<0?_lfScalingFactorThreshold:_lfScalerUpwards;
+                if (didScale == 1L) {
+                    siteRes[siteOrdering.list_data[siteID]] *= _lfScalerUpwards;
+                } else {
+                    if (didScale == -1L) {
+                        siteRes[siteOrdering.list_data[siteID]] *= _lfScalingFactorThreshold;
+                    } else {
+                        if (didScale > 0) {
+                            for (long k = 0; k < didScale; k++) {
+                                siteRes[siteOrdering.list_data[siteID]] *= _lfScalerUpwards;
+                            }
+                        } else{
+                            for (long k = 0; k < -didScale; k++) {
+                                 siteRes[siteOrdering.list_data[siteID]] *= _lfScalingFactorThreshold;
+                             }
+                        }
+                    }
+                }
             }
         }
     }
@@ -4020,6 +4431,11 @@ hyFloat          _TheTree::ComputeLLWithBranchCache (
             } else {
                 term = log(accumulator) - correction;
             }
+            
+            /*if (likeFuncEvalCallCount == 11035) {
+                fprintf (stderr, "CACHE, %ld, %ld, %20.15lg, %20.15lg, %20.15lg\n", likeFuncEvalCallCount, siteID, accumulator, correction, term);
+            }*/
+            
             hyFloat temp_sum = result + term;
             correction = (temp_sum - result) - term;
             result = temp_sum;
@@ -4551,7 +4967,8 @@ _List*   _TheTree::RecoverAncestralSequences (_DataSetFilter const* dsf,
     stateCacheDim                    = (alsoDoLeaves? (iNodeCount + leafCount): (iNodeCount));
     
     long            *stateCache                     = new long [patternCount*(iNodeCount-1)*alphabetDimension],
-    *leafBuffer                     = new long [(alsoDoLeaves?leafCount*patternCount:1)*alphabetDimension];
+                    *leafBuffer                     = new long [(alsoDoLeaves?leafCount*patternCount:1)*alphabetDimension],
+                    *initiaStateCache               = stateCache;
     
     // a Patterns x Int-Nodes x CharStates integer table
     // with the best character assignment for node i given that its parent state is j for a given site
@@ -4776,7 +5193,7 @@ _List*   _TheTree::RecoverAncestralSequences (_DataSetFilter const* dsf,
         }
     }
     
-    delete [] stateCache;
+    delete [] initiaStateCache;
     delete [] leafBuffer;
     delete [] buffer;
     

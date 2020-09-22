@@ -115,7 +115,6 @@ set(HYPHY_VERSION 2.1)
 # setup the files we'll be using
 #-------------------------------------------------------------------------------
 file(GLOB SRC_CORE src/core/*.cpp)
-file(GLOB SRC_GTESTS tests/gtests/*.cpp)
 file(GLOB SRC_NEW src/new/*.cpp)
 file(GLOB SRC_CONTRIB src/contrib/*.cpp)
 
@@ -276,14 +275,6 @@ if(${CURL_FOUND} AND NOT APPLE)
     add_definitions (-D__HYPHYCURL__)
 endif(${CURL_FOUND} AND NOT APPLE)
 
-#-------------------------------------------------------------------------------
-# gtest dependency
-#-------------------------------------------------------------------------------
-add_subdirectory(contrib/gtest-1.7.0)
-set_property(
-    TARGET gtest gtest_main
-    PROPERTY EXCLUDE_FROM_ALL true
-)
 
 
 #-------------------------------------------------------------------------------
@@ -343,15 +334,13 @@ include_directories(
     src/contrib
     src/lib/Link src/new/include
     contrib/SQLite-3.8.2 # SQLite
-    contrib/gtest-1.7.0/include
-    tests/gtests
 )
 
 
 #-------------------------------------------------------------------------------
 # shared hyphy hbl stdlib target
 #-------------------------------------------------------------------------------
-install(DIRECTORY res/ DESTINATION lib/hyphy)
+install(DIRECTORY res/ DESTINATION share/hyphy)
 
 #-------------------------------------------------------------------------------
 # HYPHYMP target
@@ -409,7 +398,7 @@ if(${MPI_FOUND})
     # set definitions here 'cause "s_t_p" below doesn't like lists
     set_property(
         TARGET HYPHYMPI
-        APPEND PROPERTY COMPILE_DEFINITIONS __HYPHYMPI__ __UNIX__ _HYPHY_LIBDIRECTORY_="${CMAKE_INSTALL_PREFIX}/lib/hyphy"
+        APPEND PROPERTY COMPILE_DEFINITIONS __HYPHYMPI__ __UNIX__ _HYPHY_LIBDIRECTORY_="${CMAKE_INSTALL_PREFIX}/share/hyphy"
     )
 
     message ("${DEFAULT_LINK_FLAGS} ${MPI_LINK_FLAGS} ${OpenMP_CXX_FLAGS}")
@@ -418,8 +407,8 @@ if(${MPI_FOUND})
         HYPHYMPI
         PROPERTIES
         if(${OPENMP_FOUND})
-            COMPILE_FLAGS "${DEFAULT_COMPILE_FLAGS} ${DEFAULT_WARNING_FLAGS} ${MPI_COMPILE_FLAGS} ${OpenMP_CXX_FLAGS} "
-            LINK_FLAGS "${DEFAULT_LINK_FLAGS} ${MPI_LINK_FLAGS} ${OpenMP_CXX_FLAGS} "
+            COMPILE_FLAGS "${DEFAULT_COMPILE_FLAGS} ${DEFAULT_WARNING_FLAGS} ${MPI_COMPILE_FLAGS} ${OpenMP_CXX_FLAGS}"
+            LINK_FLAGS "${DEFAULT_LINK_FLAGS} ${MPI_LINK_FLAGS} ${OpenMP_CXX_FLAGS}"
         else(${OPENMP_FOUND})
             COMPILE_FLAGS "${DEFAULT_COMPILE_FLAGS} ${DEFAULT_WARNING_FLAGS} ${MPI_COMPILE_FLAGS} "
             LINK_FLAGS "${DEFAULT_LINK_FLAGS} ${MPI_LINK_FLAGS}"
@@ -431,29 +420,29 @@ endif(${MPI_FOUND})
 # hyphy profile target
 #-------------------------------------------------------------------------------
 add_executable(
-    HYPHY-PROFILE
+    HYPHYPROFILE
     EXCLUDE_FROM_ALL
     ${SRC_COMMON} ${SRC_UNIXMAIN}
 )
 
 if(${OPENMP_FOUND})
-    target_link_libraries(HYPHY-PROFILE ${DEFAULT_LIBRARIES} OpenMP::OpenMP_CXX)
+    target_link_libraries(HYPHYPROFILE ${DEFAULT_LIBRARIES} OpenMP::OpenMP_CXX)
 else(${OPENMP_FOUND})
-    target_link_libraries(HYPHY-PROFILE ${DEFAULT_LIBRARIES})
+    target_link_libraries(HYPHYPROFILE ${DEFAULT_LIBRARIES})
 endif(${OPENMP_FOUND})
 
-add_custom_target(PROFILE DEPENDS HYPHY-PROFILE)
+add_custom_target(PROFILE DEPENDS HYPHYPROFILE)
 
 
 set_target_properties(
-    HYPHY-PROFILE
+    HYPHYPROFILE
     PROPERTIES
     if(${OPENMP_FOUND})
-        COMPILE_FLAGS "${DEFAULT_COMPILE_FLAGS} ${OpenMP_CXX_FLAGS} -g -fprofile-generate "
-        LINK_FLAGS "${DEFAULT_COMPILE_FLAGS} ${OpenMP_CXX_FLAGS} -g -fprofile-generate "
+        COMPILE_FLAGS "${DEFAULT_COMPILE_FLAGS} ${OpenMP_CXX_FLAGS} -g -fprofile-arcs -ftest-coverage -fprofile-generate -fanalyzer "
+        LINK_FLAGS "${DEFAULT_COMPILE_FLAGS} ${OpenMP_CXX_FLAGS} -g -fprofile-arcs -ftest-coverage -fprofile-generate -fanalyzer "
     else(${OPENMP_FOUND})
-        COMPILE_FLAGS "${DEFAULT_COMPILE_FLAGS}-g -fprofile-generate "
-        LINK_FLAGS "${DEFAULT_COMPILE_FLAGS} -g  -fprofile-generate "
+        COMPILE_FLAGS "${DEFAULT_COMPILE_FLAGS}-g -fprofile-arcs -ftest-coverage -fprofile-generate -fanalyzer "
+        LINK_FLAGS "${DEFAULT_COMPILE_FLAGS} -g  -fprofile-arcs -ftest-coverage -fprofile-generate -fanalyzer "
     endif(${OPENMP_FOUND})
 )
 
@@ -461,21 +450,24 @@ set_target_properties(
  # hyphy profile target
  #-------------------------------------------------------------------------------
  add_executable(
-     HYPHY-GPERF
+     HYPHYGPERF
      EXCLUDE_FROM_ALL
      ${SRC_COMMON} ${SRC_UNIXMAIN}
  )
 
-  target_link_libraries(HYPHY-PROFILE ${DEFAULT_LIBRARIES})
+  if(${OPENMP_FOUND})
+    target_link_libraries(HYPHYGPERF PRIVATE ${DEFAULT_LIBRARIES} OpenMP::OpenMP_CXX)
+  else(${OPENMP_FOUND})
+    target_link_libraries(HYPHYGPERF PRIVATE ${DEFAULT_LIBRARIES})
+  endif(${OPENMP_FOUND})
 
-  add_custom_target(GPERF DEPENDS HYPHY-GPERF)
-
+  add_custom_target(GPERF DEPENDS HYPHYGPERF)
 
   set_target_properties(
-     HYPHY-GPERF
+     HYPHYGPERF
      PROPERTIES
-          COMPILE_FLAGS "${DEFAULT_COMPILE_FLAGS} -g  "
-         LINK_FLAGS "${DEFAULT_COMPILE_FLAGS} -g  -L/usr/local/Cellar/gperftools/2.7/lib/ -lprofiler -ltcmalloc  "
+         COMPILE_FLAGS "${DEFAULT_COMPILE_FLAGS} -g"
+         LINK_FLAGS "${DEFAULT_LINK_FLAGS}  -g -lprofiler -ltcmalloc"
      endif(${OPENMP_FOUND})
  )
 
@@ -514,34 +506,6 @@ set_target_properties(
 
 
 
-#-------------------------------------------------------------------------------
-# hyphy gtest target
-#-------------------------------------------------------------------------------
-add_executable(
-    HYPHYGTEST
-    EXCLUDE_FROM_ALL
-    ${SRC_COMMON} ${SRC_GTESTS} ${SRC_UNIXMAIN}
-)
-add_dependencies(HYPHYGTEST gtest)
-target_link_libraries(HYPHYGTEST ${DEFAULT_LIBRARIES} gtest)
-add_custom_target(GTEST DEPENDS HYPHYGTEST)
-
-set_property(
-    TARGET HYPHYGTEST
-    APPEND PROPERTY COMPILE_DEFINITIONS __UNITTEST__
-)
-set_target_properties(
-    HYPHYGTEST
-    PROPERTIES
-    if(${OPENMP_FOUND})
-        COMPILE_FLAGS "${DEFAULT_COMPILE_FLAGS} ${DEFAULT_DEBUG_WARNING_FLAGS} ${OpenMP_CXX_FLAGS} -msse3 -g -fprofile-arcs -ftest-coverage -pg"
-        LINK_FLAGS "${DEFAULT_COMPILE_FLAGS} ${DEFAULT_DEBUG_WARNING_FLAGS} ${OpenMP_CXX_FLAGS} -msse3 -g -fprofile-arcs -ftest-coverage -pg"
-    else(${OPENMP_FOUND})
-        COMPILE_FLAGS "${DEFAULT_COMPILE_FLAGS} ${DEFAULT_DEBUG_WARNING_FLAGS} -msse3 -g -fprofile-arcs -ftest-coverage -pg"
-        LINK_FLAGS "${DEFAULT_COMPILE_FLAGS} ${DEFAULT_DEBUG_WARNING_FLAGS} -msse3 -g -fprofile-arcs -ftest-coverage -pg"
-    endif(${OPENMP_FOUND})
-)
-
 
 #-------------------------------------------------------------------------------
 # target-specific and occasionally-shared properties
@@ -549,7 +513,7 @@ set_target_properties(
 
 if(UNIX)
     set_property(
-        TARGET hyphy HYPHYGTEST HYPHYDEBUG HYPHY-PROFILE HYPHY-GPERF
+        TARGET hyphy HYPHYDEBUG HYPHYPROFILE HYPHYGPERF
         APPEND PROPERTY COMPILE_DEFINITIONS __UNIX__
     )
 endif(UNIX)
@@ -560,18 +524,18 @@ set_property(
 )
 
 set_property(
-    TARGET hyphy HYPHYGTEST HYPHYDEBUG
-    APPEND PROPERTY COMPILE_DEFINITIONS _HYPHY_LIBDIRECTORY_="${CMAKE_INSTALL_PREFIX}/lib/hyphy"
+    TARGET hyphy HYPHYDEBUG
+    APPEND PROPERTY COMPILE_DEFINITIONS _HYPHY_LIBDIRECTORY_="${CMAKE_INSTALL_PREFIX}/share/hyphy"
 )
 
 set_property(
-    TARGET hyphy HYPHYGTEST HYPHYDEBUG HYPHY-PROFILE
-    APPEND PROPERTY COMPILE_DEFINITIONS _HYPHY_LIBDIRECTORY_="${CMAKE_INSTALL_PREFIX}/lib/hyphy"
+    TARGET hyphy HYPHYDEBUG HYPHYPROFILE
+    APPEND PROPERTY COMPILE_DEFINITIONS _HYPHY_LIBDIRECTORY_="${CMAKE_INSTALL_PREFIX}/share/hyphy"
 )
 
 
 set_property(
-    TARGET HYPHYDEBUG HYPHYGTEST
+    TARGET HYPHYDEBUG
     APPEND PROPERTY COMPILE_DEFINITIONS __HYPHYDEBUG__
 )
 
@@ -596,7 +560,7 @@ makeLink(HYPHYMP hyphy hyphy)
 
 #-------------------------------------------------------------------------------
 # TESTS
-#-------------------------------------------------------------------------------
+#---------------------------------------------geany----------------------------------
 
 add_test (NAME UNIT-TESTS COMMAND bash run_unit_tests.sh)
 add_test (CODON HYPHYMP tests/hbltests/SimpleOptimizations/SmallCodon.bf)
@@ -614,4 +578,6 @@ add_test (BGM HYPHYMP tests/hbltests/libv3/BGM.wbf)
 add_test (CONTRAST-FEL HYPHYMP tests/hbltests/libv3/CFEL.wbf)
 add_test (GARD HYPHYMP tests/hbltests/libv3/GARD.wbf)
 add_test (FADE HYPHYMP tests/hbltests/libv3/FADE.wbf)
+add_test (NAME ABSREL COMMAND HYPHYMP tests/hbltests/libv3/ABSREL.wbf)
+#add_test (NAME ABSREL-MH COMMAND HYPHYMP tests/hbltests/libv3/ABSREL-MH.wbf)
 

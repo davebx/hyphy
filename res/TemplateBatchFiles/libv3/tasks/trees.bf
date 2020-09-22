@@ -102,7 +102,7 @@ lfunction trees.GetTreeString._sanitize(string) {
     if (utility.GetEnvVariable("_KEEP_I_LABELS_")) {
         utility.ToggleEnvVariable("INTERNAL_NODE_PREFIX", None);
     }
-    
+
     return string;
 }
 
@@ -135,9 +135,9 @@ lfunction trees.GetTreeString(look_for_newick_tree) {
             utility.SetEnvVariable ("LAST_FILE_IO_EXCEPTION", None);
             utility.ToggleEnvVariable ("SOFT_FILE_IO_EXCEPTIONS",TRUE);
             fscanf(PROMPT_FOR_FILE, REWIND, "Raw", treeString);
-            
+
             look_for_newick_tree = utility.getGlobalValue ("LAST_FILE_PATH");
-            
+
             if (None != utility.GetEnvVariable ("LAST_FILE_IO_EXCEPTION")) {
                 if (utility.getGlobalValue ("LAST_RAW_FILE_PROMPT") ==  utility.getGlobalValue ("terms.trees.neighbor_joining")) {
                     datafilter_name = utility.GetEnvVariable(utility.getGlobalValue ("terms.trees.data_for_neighbor_joining"));
@@ -148,11 +148,11 @@ lfunction trees.GetTreeString(look_for_newick_tree) {
                 }
                 utility.SetEnvVariable ("LAST_FILE_IO_EXCEPTION", None);
             }
-            
+
             utility.ToggleEnvVariable ("SOFT_FILE_IO_EXCEPTIONS",None);
             fprintf(stdout, "\n");
 
-  
+
             if (regexp.Find(treeString, "^#NEXUS")) {
                 ExecuteCommands(treeString);
 
@@ -254,7 +254,12 @@ lfunction trees.LoadAnnotatedTopology(look_for_newick_tree) {
 lfunction trees.LoadAnnotatedTopologyAndMap(look_for_newick_tree, mapping) {
 
     reverse = {};
-    utility.ForEach(utility.Keys(mapping), "_key_", "`&reverse`[`&mapping`[_key_]] = _key_");
+
+    for (k,v; in; mapping) {
+      reverse[v] = k;
+    }
+
+    //utility.ForEach(utility.Keys(mapping), "_key_", "`&reverse`[`&mapping`[_key_]] = _key_");
 
     io.CheckAssertion("Abs (`&mapping`) == Abs (`&reverse`)", "The mapping between original and normalized tree sequence names must be one to one");
     utility.ToggleEnvVariable("TREE_NODE_NAME_MAPPING", reverse);
@@ -353,6 +358,46 @@ lfunction trees.branch_names(tree, respect_case) {
 
 
 /**
+ * @name trees.KillZeroBranches
+ * Given a tree dict and a list of matching parameter estimates
+ * this returns a modified tree dict with all zero-branch length
+ * internal branches removed and modifies in in place
+ * @param tree - dict of the tree object
+ * @param estimates - dict with branch length estimates
+ * @param branch_set - if not null, treat as test set and delete branches form it as well
+ * @param zero_internal -- store branches that were deleted here
+ * @return modified tree
+ */
+
+lfunction trees.KillZeroBranches (tree, estimates, branch_set, zero_internal) {
+
+    for (branch, value; in; tree [^"terms.trees.partitioned"]) {
+        if (value == ^"terms.tree_attributes.internal") {
+            if (estimates / branch) {
+                if ((estimates[branch])[^"terms.fit.MLE"] < 1e-10) {
+                    zero_internal + branch;
+                }
+            }
+        }
+    }
+
+    if (Abs (zero_internal) > 0) { // has zero internal branches
+        Topology T = tree[^"terms.trees.newick_annotated"];
+        T -  Columns(zero_internal);
+        if (None != branch_set) {
+            for (branch; in; zero_internal) {
+                branch_set - branch;
+            }
+        }
+        return trees.ExtractTreeInfoFromTopology (&T);
+
+    }
+
+    return tree;
+
+}
+
+/**
  * @name trees.RootTree
  * @param {Dict} tree_info
  * @param {String} root on this node (or prompt if empty)
@@ -381,6 +426,65 @@ lfunction trees.RootTree(tree_info, root_on) {
 }
 
 /**
+ * @name trees.ExtractTreeInfoFromTopology
+ * @param {String} Topology
+ * @returns a {Dictionary} of the following tree information :
+ * - newick string
+ * - newick string with branch lengths
+ * - annotated string
+ * - model map
+ * - internal leaves
+ * - list of models
+ */
+lfunction trees.ExtractTreeInfoFromTopology(topology_object) {
+
+
+    branch_lengths = BranchLength(^topology_object, -1);
+    branch_names   = BranchName(^topology_object, -1);
+    branch_count   = utility.Array1D (branch_names) - 1;
+
+    bls = {};
+
+    for (k = 0; k < branch_count; k+=1) {
+        if (branch_lengths[k] >= 0.) {
+            bls [branch_names[k]] = branch_lengths[k];
+        }
+    }
+
+    GetInformation(modelMap, ^topology_object);
+
+
+    leaves_internals = {};
+    flat_tree = (^topology_object) ^ 0;
+    trees.PartitionTree(flat_tree, leaves_internals);
+
+    utility.ToggleEnvVariable("INCLUDE_MODEL_SPECS", TRUE);
+    T.str = "" + ^topology_object;
+    utility.ToggleEnvVariable("INCLUDE_MODEL_SPECS", None);
+
+    rooted = utility.Array1D ((flat_tree[(flat_tree[0])["Root"]])["Children"]) == 2;
+
+    flat_tree       = None;
+    branch_lengths  = None;
+    branch_names    = None;
+    branch_count    = None;
+
+    return {
+        ^"terms.trees.newick": Format(^topology_object, 1, 0),
+        ^"terms.trees.newick_with_lengths": Format(^topology_object, 1, 1),
+        ^"terms.branch_length": bls,
+        ^"terms.trees.newick_annotated": T.str,
+        ^"terms.trees.model_map": modelMap,
+        ^"terms.trees.partitioned": leaves_internals,
+        ^"terms.trees.model_list": Columns(modelMap),
+        ^"terms.trees.rooted" : rooted,
+        ^"terms.trees.meta" : Eval(^(topology_object+".__meta")),
+        ^"terms.data.file" : file_name
+
+    };
+}
+
+/**
  * @name trees.ExtractTreeInfo
  * @param {String} tree_string
  * @returns a {Dictionary} of the following tree information :
@@ -401,51 +505,8 @@ lfunction trees.ExtractTreeInfo(tree_string) {
     }
 
     Topology T = tree_string;
-    
- 
-    branch_lengths = BranchLength(T, -1);
-    branch_names   = BranchName(T, -1);
-    branch_count   = utility.Array1D (branch_names) - 1;
+    return trees.ExtractTreeInfoFromTopology (&T);
 
-    bls = {};
-
-    for (k = 0; k < branch_count; k+=1) {
-        if (branch_lengths[k] >= 0.) {
-            bls [branch_names[k]] = branch_lengths[k];
-        }
-    }
-
-    GetInformation(modelMap, T);
-
-
-    leaves_internals = {};
-    flat_tree = T ^ 0;
-    trees.PartitionTree(flat_tree, leaves_internals);
-
-    utility.ToggleEnvVariable("INCLUDE_MODEL_SPECS", TRUE);
-    T.str = "" + T;
-    utility.ToggleEnvVariable("INCLUDE_MODEL_SPECS", None);
-
-    rooted = utility.Array1D ((flat_tree[(flat_tree[0])["Root"]])["Children"]) == 2;
-
-    flat_tree       = None;
-    branch_lengths  = None;
-    branch_names    = None;
-    branch_count    = None;
-
-    return {
-        ^"terms.trees.newick": Format(T, 1, 0),
-        ^"terms.trees.newick_with_lengths": Format(T, 1, 1),
-        ^"terms.branch_length": bls,
-        ^"terms.trees.newick_annotated": T.str,
-        ^"terms.trees.model_map": modelMap,
-        ^"terms.trees.partitioned": leaves_internals,
-        ^"terms.trees.model_list": Columns(modelMap),
-        ^"terms.trees.rooted" : rooted,
-        ^"terms.trees.meta" : T.__meta,
-        ^"terms.data.file" : file_name
-
-    };
 }
 
 /**
@@ -710,6 +771,63 @@ lfunction trees.ConjunctionLabel (tree_id, given_labels) {
 }
 
 /**
+ * Compute branch labeling using conjunction, i.e. node N is labeled 'X' iff
+ * SOME of the nodes that are in the subtree rooted at 'N' are also labeled 'N'
+ * @name trees.ConjunctionLabel
+ * @param 	{String} tree ID
+ * @param 	{Dict} 	 leaf -> label
+ 					 labels may be missing for some of the leaves to induce partial labeling of the tree
+ * @returns {Dict} 	 {"labeled" : # of labeled internal  nodes, "labels" : Internal Branch -> label}
+ */
+
+lfunction trees.DisjunctionLabel (tree_id, given_labels) {
+   tree_avl = (^tree_id) ^ 0;
+   label_values = utility.UniqueValues (given_labels);
+   label_count  = utility.Array1D (label_values);
+   labels = {};
+   resulting_labels = {}; // internal nodes -> label
+   inodes_labeled = 0;
+
+   // pass 1 to fill in the score matrix
+   for (k = 0; k < Abs (tree_avl) ; k += 1) {
+   	 	node_name = (tree_avl[k])["Name"];
+   	 	node_children = (tree_avl[k])["Children"];
+   	 	c_count = utility.Array1D (node_children);
+
+   	 	if (c_count) { // internal node
+   	 		// first check to see if all the children are labeled
+
+   	 	   	child_labels = {};
+
+			for (c = 0; c < c_count; c+=1) {
+				c_name = (tree_avl[node_children[c]])["Name"];
+   	 			if (utility.Has (labels, c_name, "String") == FALSE)  {
+   	 				break;
+   	 			}
+   	 			child_labels [labels[c_name]] = TRUE;
+
+   	 		}
+   	 		if (c > 0) { // all children labeled
+    	 	   inodes_labeled += 1;
+    	 	   if (utility.Array1D (child_labels) == 1) {
+    	 	       labels [node_name] = (utility.Keys (child_labels))[0];
+    	 	       resulting_labels[node_name] = labels [node_name];
+    	 	   }
+   	 	 	}
+   	 	} else { // leaf
+   	 		if (utility.Has (given_labels, node_name, "String")) {
+                labels[node_name] = given_labels[node_name];
+   	 		}
+   	 	}
+   }
+
+
+
+   return {"labeled" : inodes_labeled, "labels" : resulting_labels};
+   // pass 1 to choose the best state for subtree parents
+}
+
+/**
  * Annotate a tree string with using user-specified labels
  * @name trees.ParsimonyLabel
  * @param 	{String} tree ID
@@ -762,7 +880,7 @@ lfunction tree.Annotate (tree_id, labels, chars, doLengths) {
             }
         }
 
-        if (doLengths) {
+        if (doLengths ) {
 
              if (nodeIndex < treeSize - 1) {
                 _ost * ":";
@@ -938,11 +1056,11 @@ lfunction tree._GenerateRandomTreeDraw2 (nodes) {
     do {
         n2 = Random (0,n) $ 1;
     } while (n1 == n2);
-    
-    
+
+
     nodes - r[n1];
     nodes - r[n2];
-    
+
     return {"0" : +r[n1], "1" : +r[n2]};
 }
 
@@ -956,18 +1074,18 @@ lfunction tree.GenerateRandomTree (N, rooted, branch_name, branch_length) {
 
     total_nodes = N + internal_nodes;
     flat_tree  = {total_nodes, 4}["-1"];
-    
+
 
     available_to_join = {};
     for (k = 0; k < N; k+=1) {
         available_to_join[k] = TRUE;
     }
-    
+
 
     current_parent_node = N;
     downto = 1 + (rooted == 0);
-    
-    
+
+
     while (Abs (available_to_join) > downto) {
         pair = tree._GenerateRandomTreeDraw2 (available_to_join);
         flat_tree[pair[0]][0] = current_parent_node;
@@ -977,13 +1095,13 @@ lfunction tree.GenerateRandomTree (N, rooted, branch_name, branch_length) {
         available_to_join[current_parent_node] = TRUE;
         current_parent_node += 1;
     }
-    
+
     if (!rooted) { // attach the last node to the root
         available_to_join - (total_nodes-1);
         leaf_index = +((Rows(available_to_join))[0]);
         flat_tree[leaf_index][0] = total_nodes-1;
         flat_tree[total_nodes-1][3] = leaf_index;
-        
+
     }
 
     return tree._NewickFromMatrix (&flat_tree, total_nodes-1, branch_name, branch_length);
@@ -1013,7 +1131,7 @@ lfunction tree._NewickFromMatrix (flat_tree, index, branch_name, branch_length) 
             } else {
                 bn := "";
             }
-            
+
             return "("   +  tree._NewickFromMatrix (flat_tree, (^flat_tree)[index][1], branch_name, branch_length) +
                      "," +  tree._NewickFromMatrix (flat_tree, (^flat_tree)[index][2], branch_name, branch_length) +
                      ")" + bn + bl;
