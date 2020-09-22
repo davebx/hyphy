@@ -15,15 +15,15 @@ jobs:
           python-version: 3.7
       - name: Install dependencies
         run:
-          python -m pip install --upgrade -f .coveralls/requirements.txt;
+          python -m pip install --upgrade -f .coveralls-requirements.txt;
       - name: Get HyPhy code
         uses: actions/checkout@v2
       - name: Install and activate miniconda
         uses: goanpeca/setup-miniconda@v1
         with:
           activate-environment: 'hyphy-test-env'
-          environment-file: '.coveralls/env.yml'
-          condarc-file: '.coveralls/condarc'
+          environment-file: '.coveralls.env.yml'
+          condarc-file: '.coveralls.condarc'
       - name: Build HyPhy
         env: 
           COVERALLS_REPO_TOKEN: ${{ secrets.coveralls_token }}
