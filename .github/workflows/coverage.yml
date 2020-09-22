@@ -34,6 +34,6 @@ jobs:
           ln -s HYPHYDEBUG HYPHYMP;
           PATH=.:$PATH make test || true;
       - name: Run tests and generate coverage information
-          make test 2>&1 || true; 
+        run:
+          make test 2>&1 || true; # The actual failure or success of these tests is immaterial, as long as the code itself gets executed
           coveralls --gcov-options '\-lp';
-
