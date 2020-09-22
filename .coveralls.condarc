@@ -2,3 +2,4 @@ channels:
   - conda-forge
   - defaults
 always_yes: True
+auto_update_conda: True
